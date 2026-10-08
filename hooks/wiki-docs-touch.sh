@@ -34,10 +34,22 @@ case "$tool" in
   *) exit 0 ;;
 esac
 
+# A file tool names its path, and that path decides the wiki, not where the shell
+# happens to stand: a session rooted above several projects writes into their
+# wikis from outside all of them. A relative path is the cwd's.
+path=""
+case "$tool" in
+  Write|Edit|MultiEdit|NotebookEdit)
+    path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // ""' <<<"$input" 2>/dev/null)
+    [[ -n "$path" ]] || exit 0
+    [[ "$path" == /* ]] || path="${cwd%/}/$path"
+    ;;
+esac
+
 # Walk up to the project marker, the same way every awt command does. Parameter
 # expansion rather than dirname: this runs after every matching tool call, and a
 # fork per level is a fork too many.
-dir="${cwd:-$PWD}"
+if [[ -n "$path" ]]; then dir="${path%/*}"; else dir="${cwd:-$PWD}"; fi
 root=""
 while [[ -n "$dir" && "$dir" != "/" ]]; do
   [[ -f "$dir/awt.config.mjs" ]] && { root="$dir"; break; }
@@ -49,7 +61,12 @@ state="${TMPDIR:-/tmp}/wiki-docs-${session}"
 
 # The Stop hook runs wherever the session finished, which need not be inside the
 # wiki any more, so the root is recorded here rather than walked for again there.
-mark() { printf '%s\n' "$root" > "$state.touched" 2>/dev/null || true; }
+# One line per wiki, each once: a session can work in several, and every one of
+# them is formatted, checked and published at Stop.
+mark() {
+  grep -qxF -- "$root" "$state.touched" 2>/dev/null ||
+    printf '%s\n' "$root" >> "$state.touched" 2>/dev/null || true
+}
 
 # A verb call is a touch and nothing more.
 case "$tool" in
@@ -87,9 +104,6 @@ if [[ "$tool" == "Bash" ]]; then
   exit 0
 fi
 
-path=$(jq -r '.tool_input.file_path // ""' <<<"$input" 2>/dev/null)
-[[ -n "$path" ]] || exit 0
-[[ "$path" == /* ]] || path="${cwd%/}/$path"
 case "$path" in
   "$notes"/*) ;;
   *) exit 0 ;;

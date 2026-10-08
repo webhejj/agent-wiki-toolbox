@@ -32,8 +32,12 @@ session=$(jq -r '.session_id // "nosession"' <<<"$input" 2>/dev/null)
 
 state="${TMPDIR:-/tmp}/wiki-docs-${session}"
 [[ -f "$state.touched" ]] || exit 0
-root=$(<"$state.touched")
-[[ -n "$root" ]] || exit 0
+# One line per wiki the session touched. With one, paths are shown relative to it;
+# with several, in full, since a relative path would not say which wiki it is in.
+roots=$(sort -u "$state.touched" 2>/dev/null)
+[[ -n "$roots" ]] || exit 0
+root=""
+[[ "$roots" == *$'\n'* ]] || root="$roots"
 
 context=""
 add() { context="$context$1"$'\n'; }
@@ -49,7 +53,7 @@ if [[ -s "$state.files" ]]; then
   # guaranteed to be free of the characters a sed expression reads as its own.
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
-    files="$files${f#${root%/}/}"$'\n'
+    if [[ -n "$root" ]]; then files="$files${f#${root%/}/}"$'\n'; else files="$files$f"$'\n'; fi
     count=$(( count + 1 ))
   done < <(sort -u "$state.files" 2>/dev/null)
   files="${files%$'\n'}"
@@ -66,8 +70,10 @@ if (( count > 0 )); then
   add "matches what you changed."
   add ""
 else
-  add "**This session has already touched the wiki at \`$root\`**, though no note was"
-  add "written through a file tool. The link graph is checked before the session ends."
+  add "**This session has already touched the wiki at:**"
+  add "$(printf '%s\n' "$roots" | sed 's/^/  /')"
+  add ""
+  add "No note was written through a file tool. The link graph is checked before the session ends."
   add ""
 fi
 

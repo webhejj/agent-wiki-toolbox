@@ -14,12 +14,25 @@
 # the temp directory named for the project, since nothing is watching it: a build that fails
 # otherwise fails silently, and is retried at the next stop until it is fixed.
 #
+# Which wikis: the ones the session touched, as wiki-docs-touch.sh recorded them, because a session
+# rooted above several projects edits their wikis from outside all of them, and its project directory
+# is no wiki at all. With no record, the project directory, as before the record was read: a wiki
+# edited by hand or by another process while the session sat in it still gets published.
+#
 # Runs beside wiki-docs-stop.sh, not after it, so a note that script reformats on the way out can be
 # newer than the release this one builds; the next stop publishes it. Fails open, like that script.
+# Bash 3.2.
 set -u
 
-dir="${CLAUDE_PROJECT_DIR:-}"
-[[ -n "$dir" && -f "$dir/awt.config.mjs" ]] || exit 0
+input=$(cat 2>/dev/null || true)
+session=""
+command -v jq >/dev/null 2>&1 && session=$(jq -r '.session_id // ""' <<<"$input" 2>/dev/null)
+
+roots=""
+state="${TMPDIR:-/tmp}/wiki-docs-${session:-nosession}"
+[[ -n "$session" && -s "$state.touched" ]] && roots=$(sort -u "$state.touched" 2>/dev/null)
+[[ -n "$roots" ]] || roots="${CLAUDE_PROJECT_DIR:-}"
+[[ -n "$roots" ]] || exit 0
 
 plugin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || exit 0
 awt="$plugin/bin/awt"
@@ -27,7 +40,9 @@ if [[ ! -x "$awt" ]]; then
   awt=$(command -v awt 2>/dev/null) || exit 0
 fi
 
-log="${TMPDIR:-/tmp}/awt-publish-$(printf '%s' "$dir" | cksum | cut -d' ' -f1).log"
-
-( cd "$dir" && "$awt" site publish --if-stale >"$log" 2>&1 ) </dev/null >/dev/null 2>&1 &
+while IFS= read -r dir; do
+  [[ -n "$dir" && -f "$dir/awt.config.mjs" ]] || continue
+  log="${TMPDIR:-/tmp}/awt-publish-$(printf '%s' "$dir" | cksum | cut -d' ' -f1).log"
+  ( cd "$dir" && "$awt" site publish --if-stale >"$log" 2>&1 ) </dev/null >/dev/null 2>&1 &
+done <<<"$roots"
 exit 0

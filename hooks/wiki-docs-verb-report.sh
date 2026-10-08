@@ -150,7 +150,8 @@ if [[ "$dry" != "true" ]]; then
       # Into the touch record, so the file this hook wrote is formatted at Stop by
       # the machinery that formats everything else the session wrote.
       state="${TMPDIR:-/tmp}/wiki-docs-${session}"
-      printf '%s\n' "$root" > "$state.touched" 2>/dev/null || true
+      grep -qxF -- "$root" "$state.touched" 2>/dev/null ||
+        printf '%s\n' "$root" >> "$state.touched" 2>/dev/null || true
       printf '%s\n' "$written" | while IFS= read -r f; do
         [[ -n "$f" ]] && printf '%s\n' "$notes/$f" >> "$state.files" 2>/dev/null
       done
