@@ -652,6 +652,93 @@ function formatDisagreements(rows) {
 
 // ----------------------------------------------------------------- the plugin
 
+/**
+ * The look the toolbox gives every wiki it publishes, on top of Quartz's own styles.
+ * Quartz builds its grid from a compile-time SCSS variable inside the shared install,
+ * which no project may edit, so the overrides ride in as a plugin resource instead.
+ *
+ *   - The left column (the Explorer) is 420px, not 320.
+ *   - Every entry in an Explorer folder gets a short branch off the folder's vertical
+ *     line, so a title that wraps still reads as one entry, and wrapped lines hang
+ *     under the first rather than under the branch.
+ *   - A button at the top right hides both sidebars and lets the page use the whole
+ *     window, for tables. Prose stays at a readable measure; tables, code, diagrams
+ *     and images take the room. The choice is remembered per browser.
+ */
+const SITE_CSS = `
+@media (min-width: 801px) {
+  #quartz-body { grid-template-columns: 420px auto !important; }
+}
+@media (min-width: 1201px) {
+  #quartz-body { grid-template-columns: 420px auto 320px !important; }
+}
+.explorer-content .folder-outer > ul { border-left-color: var(--gray); }
+.explorer-content .folder-outer > ul > li { position: relative; padding: 0.12rem 0; }
+.explorer-content .folder-outer > ul > li::before {
+  content: "";
+  position: absolute;
+  left: -0.8rem;
+  top: 0.95em;
+  width: 0.65rem;
+  border-top: 1px solid var(--gray);
+}
+.explorer-content .folder-outer > ul > li > a { display: block; line-height: 1.3; }
+
+#awt-wide-toggle {
+  position: fixed; top: 0.6rem; right: 0.8rem; z-index: 200;
+  width: 2rem; height: 2rem; padding: 0; cursor: pointer;
+  font: inherit; font-size: 1.1rem; line-height: 1;
+  color: var(--darkgray); background: var(--light);
+  border: 1px solid var(--lightgray); border-radius: 6px;
+}
+#awt-wide-toggle:hover { border-color: var(--gray); color: var(--dark); }
+@media (max-width: 800px) { #awt-wide-toggle { display: none; } }
+@media (min-width: 801px) {
+  html.awt-wide .page { max-width: none; }
+  html.awt-wide #quartz-body {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "grid-header" "grid-center" "grid-footer" !important;
+  }
+  html.awt-wide #quartz-body > .sidebar { display: none; }
+  html.awt-wide #quartz-body .center { box-sizing: border-box; padding: 0 2rem; }
+  html.awt-wide article .markdown-preview-view > :is(p, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, dl, hr) { max-width: 75ch; margin-left: auto; margin-right: auto; }
+}
+`
+
+const SITE_JS = `
+(() => {
+  const KEY = 'awt-wide'
+  const read = () => { try { return localStorage.getItem(KEY) === '1' } catch { return false } }
+  const write = (on) => { try { localStorage.setItem(KEY, on ? '1' : '0') } catch {} }
+  const apply = (on) => {
+    document.documentElement.classList.toggle('awt-wide', on)
+    const button = document.getElementById('awt-wide-toggle')
+    if (button) button.setAttribute('aria-pressed', String(on))
+  }
+  // Page navigation swaps the document's contents, so the button and the class are
+  // put back after every one; the stored choice is what survives.
+  const ensure = () => {
+    if (!document.getElementById('awt-wide-toggle')) {
+      const button = document.createElement('button')
+      button.id = 'awt-wide-toggle'
+      button.type = 'button'
+      button.textContent = '\u2194'
+      button.title = 'Show or hide the sidebars'
+      button.setAttribute('aria-label', 'Show or hide the sidebars')
+      button.addEventListener('click', () => {
+        const on = !document.documentElement.classList.contains('awt-wide')
+        write(on)
+        apply(on)
+      })
+      document.body.appendChild(button)
+    }
+    apply(read())
+  }
+  document.addEventListener('nav', ensure)
+  ensure()
+})()
+`
+
 export const Awt = (userOptions) => {
   const options = {...DEFAULTS, ...userOptions}
 
@@ -663,6 +750,13 @@ export const Awt = (userOptions) => {
 
   return {
     name: 'Awt',
+
+    externalResources() {
+      return {
+        css: [{content: SITE_CSS, inline: true}],
+        js: [{loadTime: 'afterDOMReady', contentType: 'inline', script: SITE_JS}],
+      }
+    },
 
     markdownPlugins(ctx) {
       const moved = movesIn(index())

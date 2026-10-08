@@ -132,6 +132,21 @@ function baseConfig(site, quartz, parse, die) {
   // set by hand; the reason is beside each.
   config.configuration.analytics = { provider: null }
 
+  // A serif for reading; the code font stays Quartz's.
+  config.configuration.theme ??= {}
+  config.configuration.theme.typography = {
+    ...(config.configuration.theme.typography ?? {}),
+    header: "Source Serif 4",
+    body: "Source Serif 4",
+  }
+  // quartz-fonts runs after the theme and overrides its typography, so the serif is
+  // set on the plugin as well; without options it falls back to system sans stacks.
+  const fonts = findEntry(config, endsWithName("quartz-fonts"))
+  if (fonts) {
+    const serif = { name: "Source Serif 4", weights: [400, 600, 700], includeItalic: true }
+    fonts.options = { ...(fonts.options ?? {}), fontOrigin: "googleFonts", header: serif, body: serif }
+  }
+
   // Unresolved wikilinks rendered with the `broken` class: the shadow reads it to
   // tell a placeholder from a disagreement, and the handoff copy to neutralise a
   // link rather than report it.
