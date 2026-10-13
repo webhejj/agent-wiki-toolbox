@@ -28,7 +28,7 @@ Nothing of the toolbox on this machine yet — no `~/.local/lib/agent-wiki-toolb
 `~/.agents/skills/wiki-docs`.
 
 ```shell
-git clone git@github.com:gnagy/agent-wiki-toolbox.git
+git clone git@github.com:webhejj/agent-wiki-toolbox.git
 cd agent-wiki-toolbox
 scripts/install
 ```
