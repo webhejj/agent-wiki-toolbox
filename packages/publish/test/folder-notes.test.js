@@ -100,6 +100,39 @@ test('an href into a moved note gets the trailing slash back', async (t) => {
   assert.equal(external.properties.href, 'https://example.com/campaigns/cosites-v2')
 })
 
+test('an image in a note becomes a link to itself, marked for the overlay and kept from the page router', async (t) => {
+  const plugin = (await load())({index: index(t)})
+  const zoom = plugin.htmlPlugins({}).at(-1)
+  const img = (src) => ({type: 'element', tagName: 'img', properties: {src, alt: 'a view'}, children: []})
+  const loose = img('../views/01-context.png')
+  const linked = img('../views/02-app.png')
+  const tree = {
+    type: 'root',
+    children: [
+      {type: 'element', tagName: 'p', properties: {}, children: [loose]},
+      {type: 'element', tagName: 'a', properties: {href: 'elsewhere'}, children: [linked]},
+    ],
+  }
+  zoom()(tree, {data: {slug: 'notes/plain'}})
+
+  const wrapper = tree.children[0].children[0]
+  assert.equal(wrapper.tagName, 'a')
+  assert.equal(wrapper.properties.href, '../views/01-context.png')
+  assert.deepEqual(wrapper.properties.className, ['awt-zoom'])
+  assert.equal(wrapper.properties.dataRouterIgnore, '', 'Quartz would fetch the PNG as a page')
+  assert.equal(wrapper.children[0], loose)
+  // An image that is already a link keeps the link it was given.
+  assert.equal(tree.children[1].properties.href, 'elsewhere')
+  assert.equal(tree.children[1].children[0], linked)
+})
+
+test('the button back to every wiki ships only when the build names that page', async (t) => {
+  const make = await load()
+  const scripts = (options) => make({index: index(t), ...options}).externalResources().js.map((one) => one.script).join('\n')
+  assert.match(scripts({home: 'http://localhost:8088/wikis/'}), /awt-home[\s\S]*"http:\/\/localhost:8088\/wikis\/"/)
+  assert.doesNotMatch(scripts({}), /awt-home/)
+})
+
 test('with no index it refuses rather than guessing', async () => {
   const plugin = (await load())({index: '/nowhere/at/all.json'})
   assert.throws(() => plugin.markdownPlugins({}), /no index at \/nowhere\/at\/all.json/)

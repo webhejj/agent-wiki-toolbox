@@ -58,7 +58,7 @@ import { requireProjectRoot } from "./project-root.js"
 import { ensureQuartz, quartzDir } from "./bootstrap.js"
 import { readDeclaration } from "./declaration.js"
 import { writeSiteConfig } from "./site-config.js"
-import { loadMachineIfPresent, machineRegistryFor, registeredAt } from "./machine.js"
+import { homeFor, loadMachineIfPresent, machineRegistryFor, registeredAt } from "./machine.js"
 import { DEV, PUBLISHED } from "./layout.js"
 import { followNotes, FOLLOWING } from "./follow.js"
 
@@ -171,6 +171,7 @@ export async function serve(argv = process.argv.slice(2), { reindex } = {}) {
     port: httpPort,
     serving: true,
     machineRegistry: machineRegistryFor(null, die),
+    home: homeFor(null, { die }),
     die,
   })
 

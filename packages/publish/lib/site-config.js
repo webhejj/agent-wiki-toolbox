@@ -183,7 +183,7 @@ function absoluteSource(source, projectDir) {
  * base is the port, the published base is the declared host, and both indexes
  * sit at fixed names under the site.
  */
-function pluginEntry(declaration, { port, baseUrl, serving, target, releaseDir, machineRegistry = {} }) {
+function pluginEntry(declaration, { port, baseUrl, serving, target, releaseDir, machineRegistry = {}, home = null }) {
   // The machine's wikis first, then the wiki's own entries over them, field by field.
   const registry = {}
   for (const key of new Set([...Object.keys(machineRegistry), ...Object.keys(declaration.registry ?? {})])) {
@@ -212,6 +212,7 @@ function pluginEntry(declaration, { port, baseUrl, serving, target, releaseDir, 
       registry,
       shadow: true,
       headings: "static/awtHeadings.json",
+      home,
     },
   }
 }
@@ -227,13 +228,14 @@ function pluginEntry(declaration, { port, baseUrl, serving, target, releaseDir, 
  *   target        the address a publish build is for (see target.js), or null
  *   releaseDir    where that build lands, relative to the site, as `./build/published/<slug>`
  *   machineRegistry  the machine's wikis as the plugin reads them (see machine.js), under the wiki's own
+ *   home          the page listing every wiki on the host, for the plugin's button back to it, or null
  *   warn          where a line about an unknown key goes
  */
 export async function deriveSiteConfig(
   site,
   quartz,
   declaration = {},
-  { projectDir = path.dirname(site), port, serving = true, target = null, releaseDir, machineRegistry, die, warn = (m) => console.warn(m) } = {},
+  { projectDir = path.dirname(site), port, serving = true, target = null, releaseDir, machineRegistry, home = null, die, warn = (m) => console.warn(m) } = {},
 ) {
   const { parse } = await loadFromQuartz(quartz, "yaml", die)
 
@@ -267,7 +269,7 @@ export async function deriveSiteConfig(
   // The toolbox's entry, whichever base was taken. A project file carrying one
   // already (a hand-wired install, say) keeps its own.
   if (!findEntry(config, (source) => source === PLUGIN_SOURCE || source.split("/").pop() === "awt")) {
-    config.plugins.push(pluginEntry(declaration, { port, baseUrl, serving, target, releaseDir, machineRegistry }))
+    config.plugins.push(pluginEntry(declaration, { port, baseUrl, serving, target, releaseDir, machineRegistry, home }))
   }
 
   // Declared plugins: replace by source, else append.

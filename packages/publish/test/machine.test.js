@@ -15,6 +15,7 @@ import {
   configDir,
   describeMachine,
   expandHome,
+  homeFor,
   loadMachine,
   loadMachineIfPresent,
   pluginRegistry,
@@ -184,6 +185,17 @@ test('the plugin is given an address and an index for each wiki, for the target 
   // A target that is not named, built for a project served at its own base, takes no part in the layout.
   const legacy = pluginRegistry(machine, {target: {base: 'https://wiki.example.org', slug: 'wiki-example-org', mount: null, targetName: null}})
   assert.equal(legacy.dios.published, undefined)
+})
+
+test('the way back to every wiki is the base of the target built for, else the default one', () => {
+  const dir = config({'targets.yaml': TARGETS, 'default-target': 'local\n'})
+  const machine = loadMachine({dir})
+  const mounted = {...machine.targets.get('public'), mount: 'shelton', name: 'dios'}
+  assert.equal(homeFor(mounted, {dir}), 'https://example.org/docs/', 'a build for a target: its base, not the default')
+  assert.equal(homeFor({base: 'https://wiki.example.org', mount: null}, {dir}), null, 'a wiki served at its own base has nothing above it')
+  assert.equal(homeFor(null, {dir}), 'http://localhost:8088/wikis/', 'a dev server: the default target')
+  assert.equal(homeFor(null, {dir: config({'targets.yaml': TARGETS})}), null, 'no default target, no page to go back to')
+  assert.equal(homeFor(null, {dir: join(tmpdir(), 'awt-machine-absent-' + process.pid)}), null, 'and no configuration at all')
 })
 
 test('a release is found where an explicit build puts it, or where the declared one records its address', () => {

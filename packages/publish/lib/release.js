@@ -70,7 +70,7 @@ import { DERIVED_CONFIG, writeSiteConfig } from "./site-config.js"
 import { DEV, HANDOFF, OFFLINE, PUBLISHED, ensureBuildDir, publishedDir } from "./layout.js"
 import { staleness, takeLock } from "./stale.js"
 import { compareRecord, releaseRecord, resolveTarget, retargetScheme } from "./target.js"
-import { configDir, loadMachine, loadMachineIfPresent, machineRegistryFor, readDefaultTarget, registeredAt } from "./machine.js"
+import { configDir, homeFor, loadMachine, loadMachineIfPresent, machineRegistryFor, readDefaultTarget, registeredAt } from "./machine.js"
 
 /** The toolbox root: packages/publish/lib -> packages/publish -> packages -> root. */
 const HERE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
@@ -850,6 +850,8 @@ export async function publish(argv = process.argv.slice(2), { reindex, beforeBui
     target,
     releaseDir: releaseDirIn(site, out),
     machineRegistry: machineRegistryFor(target, die),
+    // A handoff copy is read off the disk, away from any host.
+    home: values.offline ? null : homeFor(target, { die }),
     die,
   })
   say(`config: ${DERIVED_CONFIG} (${derived.own ? "from this project's own quartz.config.yaml" : "derived"})`)

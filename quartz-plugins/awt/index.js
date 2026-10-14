@@ -104,6 +104,8 @@ const DEFAULTS = {
   registry: {},
   shadow: true,
   headings: 'static/awtHeadings.json',
+  // The page listing every wiki on the host, for the button that leads back to it.
+  home: null,
   warnOnUnknownPrefix: true,
   warnOnMissingIndex: true,
   warnOnMissingPath: true,
@@ -703,7 +705,117 @@ const SITE_CSS = `
   html.awt-wide #quartz-body .center { box-sizing: border-box; padding: 0 2rem; }
   html.awt-wide article .markdown-preview-view > :is(p, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, dl, hr) { max-width: 75ch; margin-left: auto; margin-right: auto; }
 }
+
+#awt-home {
+  position: fixed; top: 0.6rem; right: 3.2rem; z-index: 200;
+  box-sizing: border-box; width: 2rem; height: 2rem;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; line-height: 1; text-decoration: none;
+  color: var(--darkgray); background: var(--light);
+  border: 1px solid var(--lightgray); border-radius: 6px;
+}
+#awt-home:hover { border-color: var(--gray); color: var(--dark); }
+@media (max-width: 800px) { #awt-home { right: 0.8rem; } }
+
+a.awt-zoom { cursor: zoom-in; }
+#awt-zoom-overlay {
+  position: fixed; inset: 0; z-index: 1000; overflow: auto;
+  display: flex; background: color-mix(in srgb, var(--light) 92%, transparent);
+  cursor: zoom-out;
+}
+#awt-zoom-overlay img {
+  margin: auto; max-width: 96vw; max-height: 96vh; object-fit: contain;
+  background: white; box-shadow: 0 0 1.5rem rgb(0 0 0 / 0.25); cursor: zoom-in;
+}
+#awt-zoom-overlay.awt-actual img { max-width: none; max-height: none; cursor: zoom-out; }
 `
+
+/**
+ * A picture in a note opens at full size. The link is in the HTML, so a build with no
+ * scripts (the offline handoff) still opens the image itself; where scripts run, the
+ * link opens an overlay instead. The overlay fits the image to the window, a click on
+ * the image shows it at its own size to scroll around in, and Escape or a click beside
+ * it closes it.
+ */
+const ZOOM_JS = `
+(() => {
+  if (window.awtZoom) return
+  window.awtZoom = true
+  const close = () => document.getElementById('awt-zoom-overlay')?.remove()
+  const open = (href, alt) => {
+    close()
+    const overlay = document.createElement('div')
+    overlay.id = 'awt-zoom-overlay'
+    overlay.setAttribute('role', 'dialog')
+    overlay.setAttribute('aria-label', alt || 'Image')
+    const img = document.createElement('img')
+    img.src = href
+    img.alt = alt
+    overlay.appendChild(img)
+    overlay.addEventListener('click', (event) => {
+      if (event.target === img) overlay.classList.toggle('awt-actual')
+      else close()
+    })
+    document.body.appendChild(overlay)
+  }
+  document.addEventListener('click', (event) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    const link = event.target.closest?.('a.awt-zoom')
+    if (!link) return
+    event.preventDefault()
+    open(link.href, link.querySelector('img')?.alt ?? '')
+  })
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close()
+  })
+  document.addEventListener('nav', close)
+})()
+`
+
+/**
+ * A button beside the sidebar toggle that leads back to the page listing every wiki on
+ * the host this one is served from. The address is the build's to give, so a wiki
+ * served on its own, or built for nowhere, gets no button.
+ */
+const homeJs = (home) => `
+(() => {
+  const ensure = () => {
+    if (document.getElementById('awt-home')) return
+    const link = document.createElement('a')
+    link.id = 'awt-home'
+    link.href = ${JSON.stringify(home)}
+    link.textContent = '\\u2302'
+    link.title = 'All wikis'
+    link.setAttribute('aria-label', 'All wikis')
+    link.dataset.routerIgnore = ''
+    document.body.appendChild(link)
+  }
+  document.addEventListener('nav', ensure)
+  ensure()
+})()
+`
+
+/**
+ * Wrap every image in the note body that is not already a link in a link to the image
+ * itself, marked for the overlay. `data-router-ignore` keeps Quartz's page router from
+ * fetching a PNG as if it were a page.
+ */
+export function linkImages(node) {
+  if (!node || typeof node !== 'object' || !Array.isArray(node.children)) return
+  if (node.tagName === 'a') return
+  node.children = node.children.map((child) => {
+    if (child?.tagName !== 'img' || typeof child.properties?.src !== 'string') {
+      linkImages(child)
+      return child
+    }
+    return {
+      type: 'element',
+      tagName: 'a',
+      properties: {href: child.properties.src, className: ['awt-zoom'], dataRouterIgnore: ''},
+      children: [child],
+    }
+  })
+}
 
 const SITE_JS = `
 (() => {
@@ -754,7 +866,11 @@ export const Awt = (userOptions) => {
     externalResources() {
       return {
         css: [{content: SITE_CSS, inline: true}],
-        js: [{loadTime: 'afterDOMReady', contentType: 'inline', script: SITE_JS}],
+        js: [
+          {loadTime: 'afterDOMReady', contentType: 'inline', script: SITE_JS},
+          {loadTime: 'afterDOMReady', contentType: 'inline', script: ZOOM_JS},
+          ...(options.home ? [{loadTime: 'afterDOMReady', contentType: 'inline', script: homeJs(options.home)}] : []),
+        ],
       }
     },
 
@@ -773,7 +889,8 @@ export const Awt = (userOptions) => {
 
     htmlPlugins() {
       const moved = movesIn(index())
-      if (moved.size === 0) return []
+      const zoom = () => (tree) => linkImages(tree)
+      if (moved.size === 0) return [zoom]
       return [
         () => (tree, file) => {
           const from = file?.data?.slug
@@ -788,6 +905,7 @@ export const Awt = (userOptions) => {
             node.properties.href = `${link}/${anchor}`
           })
         },
+        zoom,
       ]
     },
 

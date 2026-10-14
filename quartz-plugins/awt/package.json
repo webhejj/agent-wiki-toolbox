@@ -1,7 +1,7 @@
 {
   "name": "@agent-wiki-toolbox/quartz",
   "version": "0.0.0",
-  "description": "The toolbox inside a Quartz build: folder notes served at the address the index gives them, prefixed cross-wiki links resolved from the target wiki's own content index, every page's heading anchors published, and the shadow comparison of Quartz's link resolution against the toolbox's",
+  "description": "The toolbox inside a Quartz build: folder notes served at the address the index gives them, prefixed cross-wiki links resolved from the target wiki's own content index, every page's heading anchors published, the shadow comparison of Quartz's link resolution against the toolbox's, images that open at full size, and a button back to the host's list of wikis",
   "type": "module",
   "main": "index.js",
   "exports": { ".": "./index.js" },
@@ -19,7 +19,8 @@
       "self": null,
       "registry": {},
       "shadow": true,
-      "headings": "static/awtHeadings.json"
+      "headings": "static/awtHeadings.json",
+      "home": null
     }
   }
 }

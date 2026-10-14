@@ -293,6 +293,19 @@ export function pluginRegistry(machine, { target = null } = {}) {
   return out
 }
 
+/**
+ * The page that lists every wiki on a host, which `awt site host` serves at the base: for a
+ * build for `target`, that target's base; for a dev server, the default target's. A wiki
+ * published at a base of its own has no such page above it, and neither does a machine
+ * with no default target, so both are `null`.
+ */
+export function homeFor(target, { dir = configDir(), die = throwing } = {}) {
+  if (target) return target.mount ? `${target.base}/` : null
+  const machine = loadMachineIfPresent({ dir, die })
+  const fallback = machine?.defaultTarget ? machine.targets.get(machine.defaultTarget) : null
+  return fallback ? `${fallback.base}/` : null
+}
+
 /** The wikis the machine knows, as the plugin reads them for a build for `target`; none on a machine with no config. */
 export function machineRegistryFor(target, die = throwing) {
   const machine = loadMachineIfPresent({ die })

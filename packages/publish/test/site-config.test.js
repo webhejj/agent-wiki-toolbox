@@ -144,6 +144,14 @@ test('the plugin is told which build it is deriving for, so it does not have to 
   assert.equal(optionsOf(published).target, 'published')
 })
 
+test('the plugin is given the page that lists every wiki, or nothing to link to', async () => {
+  const site = tmp()
+  const optionsOf = (derived) => derived.config.plugins.find((one) => one.source === PLUGIN_SOURCE).options
+  const home = 'http://localhost:8088/wikis/'
+  assert.equal(optionsOf(await deriveSiteConfig(site, fakeQuartz(), {}, {port: 8101, home, die})).home, home)
+  assert.equal(optionsOf(await deriveSiteConfig(site, fakeQuartz(), {}, {port: 8101, die})).home, null)
+})
+
 test('a target sets the base Quartz is told and the address the wiki publishes its own index under', async () => {
   const site = tmp()
   const target = {url: 'http://localhost:8088/wikis/shelton/dios', hostPath: 'localhost:8088/wikis/shelton/dios'}
