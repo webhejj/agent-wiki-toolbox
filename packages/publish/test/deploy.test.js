@@ -200,6 +200,10 @@ test('after a publish the release goes into a local library\'s tree, and nowhere
   assert.equal(deployAfterPublish({machine: m, target: {targetName: 'local'}, key: 'not-a-member', run}), null)
   assert.equal(deployAfterPublish({machine: m, target: {base: 'https://x.org'}, key: 'shelton-dios', run}), null, 'a bare base belongs to no library')
   assert.equal(calls.length, 0)
+
+  const sent = deployAfterPublish({machine: m, target: {targetName: 'proton'}, key: 'shelton-dios', remote: true, run})
+  assert.equal(sent.library, 'proton', 'a publish that named the library reaches it')
+  assert.deepEqual(calls.map((c) => c[1].at(-1)), ['proton:/opt/docker/awt-wikis/', 'proton:/opt/docker/awt-wikis/library/shelton/shelton-dios/'], 'the pages and config, then the one release')
 })
 
 test('rsync is the one on this machine, and takes the flags deploy passes', () => {

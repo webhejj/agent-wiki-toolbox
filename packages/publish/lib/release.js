@@ -589,9 +589,9 @@ export function verifyFileUrls(root) {
 }
 
 /** Copy a swapped-in release into its library's tree, saying so; a failure is reported and is not the publish's. */
-function deployHere({ target, key, say }) {
+function deployHere({ target, key, remote = false, say }) {
   try {
-    const result = deployAfterPublish({ machine: loadMachineIfPresent(), target, key })
+    const result = deployAfterPublish({ machine: loadMachineIfPresent(), target, key, remote })
     if (!result) return null
     const copied = result.steps.find((s) => s.step === "release")
     if (copied) say(`  deployed to ${copied.to} in ${copied.ms} ms`)
@@ -882,8 +882,10 @@ export async function publish(argv = process.argv.slice(2), { reindex, beforeBui
   say()
 
   // A library deployed to a directory here gets each new release copied into its tree. The key is the
-  // wiki's own, which is what the library lists it under.
-  const deployer = () => deployHere({ target, key: registered?.key ?? declaration.self, say })
+  // wiki's own, which is what the library lists it under. One deployed over ssh gets it only from a
+  // single publish that named the library: not from a save under --watch, nor from a hook's --if-stale.
+  const remote = values.target !== undefined && !values.watch && !values["if-stale"]
+  const deployer = () => deployHere({ target, key: registered?.key ?? declaration.self, remote, say })
 
   if (values.watch) {
     // Resident: Quartz keeps every parsed note, rebuilds the one that changed, and each finished

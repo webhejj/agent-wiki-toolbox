@@ -1,6 +1,6 @@
 ---
 name: wiki-docs
-description: Work with a wikilinked markdown wiki through the agent-wiki-toolbox, the `awt` CLI and its MCP tools - search and check the link graph, format notes, read and write front matter, and rename, move, split or merge notes with their links rewritten. Read it before restructuring or bulk-editing wiki notes with any tool, formatting a wiki, mounting another project's wiki, or setting one up.
+description: Work with a wikilinked markdown wiki through the agent-wiki-toolbox, the `awt` CLI and its MCP tools - search and check the link graph, format notes, read and write front matter, and rename, move, split or merge notes with their links rewritten. Read it before restructuring or bulk-editing wiki notes with any tool, formatting a wiki, publishing one to a library or server, mounting another project's wiki, or setting one up.
 ---
 
 # Wiki Docs
@@ -238,6 +238,31 @@ has adopted it is the project's to say. The parts that touch how notes are writt
 OKF expresses the graph as bundle-relative markdown links. The toolbox reads `[[wikilinks]]`, so
 a wiki using both keeps its edges in wikilinks and a generic OKF consumer sees the notes without
 the edges. That is a legal extension, not a conformance break.
+
+## Publishing
+
+A wiki is published as a static site into one or more **libraries**, each a base URL on some server,
+declared on the machine in `~/.config/awt/libraries/`. `awt site wikis --key <key>` names the
+libraries that hold a wiki and its address in each; the names are the machine's, so read them there
+rather than assuming any.
+
+| Asked for                         | Run, in the wiki's project                                         |
+|-----------------------------------|--------------------------------------------------------------------|
+| Publish this wiki                 | `awt site publish`: the default library                            |
+| Publish it to a named library     | `awt site publish --library <name>`: builds it and copies it there |
+| Republish every wiki in a library | `awt site publish --library <name>` in each wiki's project         |
+| Resend what is already built      | `awt site deploy --library <name>`                                 |
+
+- **The default library is kept current without asking.** The plugin's Stop hook rebuilds a wiki's
+  release there when a note is newer than it. Nothing else is published by anything but a request.
+- **A library on another machine is reached only when a person asks.** Never publish to one unasked,
+  and never from a hook or a watch.
+- **Offer once, after a significant change.** When a session added notes, restructured or rewrote a
+  wiki that a library on another machine holds, say at the end that that server still shows the old
+  version and offer to publish there. A typo fix is not significant. Do not repeat the offer in the
+  session.
+- **A first publish to a library is a person's decision.** It fixes an address, and a wiki the library
+  does not hold is refused with the `awt site register` command that would add it.
 
 ## Other wikis
 

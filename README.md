@@ -92,7 +92,7 @@ awt site publish --base http://localhost:8088/wikis --mount shelton --name dios
                                  # …for one address: <base>/<mount>/<name>/
 awt site publish --watch         # keep the published site current while you edit: a save is live in about a second
 awt site publish --if-stale      # rebuild only if a note is newer than the standing release; never a first release (what the Stop hook runs)
-awt site publish --library proton  # …for a library in ~/.config/awt/libraries/proton.yaml, at its collection's path
+awt site publish --library proton  # …for a library in ~/.config/awt/libraries/proton.yaml, at its collection's path, and copied to its server
 awt site verify                  # does the published site carry the address this project says it is built for?
 awt site register --collection tools  # put this wiki in a collection of the default library (--library for another)
 awt site wikis                   # the machine's libraries and collections, and each wiki's address in each

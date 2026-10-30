@@ -282,15 +282,17 @@ function writeFiles(root, files, fs) {
 
 /**
  * After a publish swaps a release in: copy it into the library's tree when the library deploys to a
- * directory on this machine. A library deployed over ssh is deployed by hand, since a save is not a
- * reason to reach another machine. Returns what happened, or null when there is nothing to do.
+ * directory on this machine. A library deployed over ssh is reached only with `remote`, when a person
+ * named the library for this one publish: a save, or a hook, is not a reason to reach another machine.
+ * Returns what happened, or null when there is nothing to do.
  */
-export function deployAfterPublish({ machine, target, key, run = spawnSync }) {
+export function deployAfterPublish({ machine, target, key, remote = false, run = spawnSync }) {
   if (!machine || !target?.targetName || !key) return null
   const library = machine.targets.get(target.targetName)
-  if (!library?.deploy || library.deploy.remote || !library.members.has(key)) return null
+  if (!library?.deploy || (library.deploy.remote && !remote) || !library.members.has(key)) return null
   const plan = planDeploy({ machine, libraryName: library.name, only: key })
-  const firstTime = !nodeFs.existsSync(path.join(library.deploy.path, "library", "index.html"))
+  // A remote tree cannot be looked at cheaply, and its pages and config are a few small files: send them.
+  const firstTime = library.deploy.remote || !nodeFs.existsSync(path.join(library.deploy.path, "library", "index.html"))
   const steps = runDeploy(plan, { run, pages: firstTime })
   return { library: library.name, steps, skipped: plan.wikis.filter((w) => w.state === "skipped") }
 }
