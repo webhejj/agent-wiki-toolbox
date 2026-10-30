@@ -1334,116 +1334,127 @@ test('measure counts the body and not the front matter, and a folder expands', (
 })
 
 /**
- * The machine's wikis, through the command and not the library: register from inside a project,
+ * The machine's libraries, through the command and not the library: register from inside a project,
  * look at them, and take one out again, with a configuration directory that is this test's own.
  */
-test('a wiki is registered from its project, listed with its addresses, and unregistered', () => {
+test('a wiki is registered into a collection, listed with its addresses, and unregistered', () => {
   const dir = mkdtempSync(join(tmpdir(), 'awt-register-'))
   const config = join(dir, 'config')
   const project = join(dir, 'shelton-dios')
   mkdirSync(join(project, 'wiki', 'notes'), {recursive: true})
   mkdirSync(join(project, 'wiki', 'site'), {recursive: true})
   writeFileSync(join(project, 'wiki', 'notes', 'index.md'), '# x\n')
-  writeFileSync(join(project, 'awt.config.mjs'), "export default {site: {self: 'dios', mount: 'shelton'}, serve: {port: 8101}}\n")
-  mkdirSync(config, {recursive: true})
-  writeFileSync(join(config, 'targets.yaml'), 'local:\n  base: http://localhost:8088/wikis\n')
+  writeFileSync(join(project, 'awt.config.mjs'), "export default {site: {self: 'shelton-dios'}, serve: {port: 8101}}\n")
+  mkdirSync(join(config, 'libraries'), {recursive: true})
+  const file = join(config, 'libraries', 'local.yaml')
+  writeFileSync(file, '# my wikis\nbase: http://localhost:8088/wikis\ncollections:\n  shelton:\n    path: clients/shelton\n    title: Shelton\n')
   const env = {...process.env, AWT_CONFIG_DIR: config}
+  delete env.AWT_LIBRARY
 
-  const registered = awt(['site', 'register'], {cwd: project, env})
+  assert.equal(awt(['site', 'register', '--collection', 'shelton'], {cwd: project, env}).status, 2, 'no library named and no default')
+  writeFileSync(join(config, 'awt.yaml'), 'default-library: local\n')
+  assert.equal(awt(['site', 'register'], {cwd: project, env}).status, 2, 'a wiki new to the library needs its collection')
+  assert.equal(awt(['site', 'register', '--collection', 'nope'], {cwd: project, env}).status, 1)
+
+  const registered = awt(['site', 'register', '--collection', 'shelton', '--name', 'dios'], {cwd: project, env})
   assert.equal(registered.status, 0, registered.stderr)
-  assert.match(registered.stdout, /registered dios as shelton\/dios/)
-  const file = join(config, 'registry.d', 'shelton.yaml')
+  assert.match(registered.stdout, /registered shelton-dios in local, collection shelton/)
   const written = readFileSync(file, 'utf8')
-  assert.match(written, /dios:\n {2}mount: shelton\n {2}name: dios\n {2}site: /)
-  assert.doesNotMatch(written, /dev:/, 'a dev address is recorded only when asked for')
+  assert.match(written, /^# my wikis/, 'comments stay')
+  assert.match(written, /wikis:\n {6}shelton-dios:\n {8}name: dios\n {8}site: /, 'block style, the name because it is not the key')
+  assert.doesNotMatch(written, /dev:|repo:/, 'a dev address only when asked for, a repo only for a library deployed over ssh')
 
-  assert.match(awt(['site', 'register'], {cwd: project, env}).stdout, /already registered .*unchanged/)
-  assert.equal(awt(['site', 'register', '--dev', '--force'], {cwd: project, env}).status, 0)
+  assert.match(awt(['site', 'register', '--name', 'dios'], {cwd: project, env}).stdout, /already in local, collection shelton, unchanged/, 'the collection is remembered')
+  assert.equal(awt(['site', 'register', '--name', 'dios', '--dev'], {cwd: project, env}).status, 1, 'a different entry needs --force')
+  assert.equal(awt(['site', 'register', '--name', 'dios', '--dev', '--force'], {cwd: project, env}).status, 0)
   assert.match(readFileSync(file, 'utf8'), /dev: http:\/\/localhost:8101/)
 
   const listed = awt(['site', 'wikis'], {cwd: dir, env})
   assert.equal(listed.status, 0, listed.stderr)
-  assert.match(listed.stdout, /local {5}http:\/\/localhost:8088\/wikis/)
-  assert.match(listed.stdout, /local {3}http:\/\/localhost:8088\/wikis\/shelton\/dios\//)
-  assert.equal(JSON.parse(awt(['site', 'wikis', '--key', 'dios', '--json'], {cwd: dir, env}).stdout).wikis[0].mount, 'shelton')
+  assert.match(listed.stdout, /local {5}http:\/\/localhost:8088\/wikis {2}\(default\)/)
+  assert.match(listed.stdout, /local {3}http:\/\/localhost:8088\/wikis\/clients\/shelton\/dios\//)
+  assert.equal(JSON.parse(awt(['site', 'wikis', '--key', 'shelton-dios', '--json'], {cwd: dir, env}).stdout).wikis[0].mount, 'clients/shelton')
   assert.equal(awt(['site', 'wikis', '--key', 'nope'], {cwd: dir, env}).status, 1)
 
-  const removed = awt(['site', 'unregister', 'dios'], {cwd: dir, env})
+  const removed = awt(['site', 'unregister', 'shelton-dios'], {cwd: dir, env})
   assert.equal(removed.status, 0, removed.stderr)
-  assert.ok(!existsSync(file), 'the file held no other wiki and is gone')
-  assert.equal(awt(['site', 'unregister', 'dios'], {cwd: dir, env}).status, 1)
+  assert.doesNotMatch(readFileSync(file, 'utf8'), /shelton-dios/)
+  assert.equal(awt(['site', 'unregister', 'shelton-dios'], {cwd: dir, env}).status, 1)
   rmSync(dir, {recursive: true, force: true})
 })
 
-/** `awt site host`: what it writes, and the refusals that need no Docker to be made. */
-test('host writes the config and the page, a dry run writes nothing, and a bad request is refused first', () => {
+/** `awt site deploy` and `awt site host`: what they write, and the refusals that need no Docker to be made. */
+test('host deploys the tree and the config, a dry run writes nothing, and a bad request is refused first', () => {
   const dir = mkdtempSync(join(tmpdir(), 'awt-host-'))
   const config = join(dir, 'config')
   const site = join(dir, 'dios', 'wiki', 'site')
-  mkdirSync(join(config, 'registry.d'), {recursive: true})
+  const tree = join(dir, 'tree')
+  mkdirSync(join(config, 'libraries'), {recursive: true})
   mkdirSync(site, {recursive: true})
-  writeFileSync(join(config, 'targets.yaml'), 'local:\n  base: http://localhost:8088/wikis\npublic:\n  base: https://example.org/docs\n')
-  writeFileSync(join(config, 'registry.d', 'shelton.yaml'), `dios:\n  mount: shelton\n  name: dios\n  site: ${site}\n`)
+  const collections = `collections:\n  shelton:\n    path: shelton\n    title: Shelton\n    wikis:\n      dios:\n        site: ${site}\n`
+  writeFileSync(join(config, 'libraries', 'local.yaml'), `base: http://localhost:8088/wikis\ndeploy:\n  to: ${tree}\n${collections}`)
+  writeFileSync(join(config, 'libraries', 'public.yaml'), `base: https://example.org/docs\ndeploy:\n  to: example:/srv/wikis\n${collections}`)
   const env = {...process.env, AWT_CONFIG_DIR: config}
   delete env.AWT_TARGET
+  delete env.AWT_LIBRARY
 
-  assert.equal(awt(['site', 'host'], {cwd: dir, env}).status, 2, 'with no target named and no default there is nothing to serve')
-  writeFileSync(join(config, 'default-target'), 'local\n')
+  assert.equal(awt(['site', 'host'], {cwd: dir, env}).status, 2, 'with no library named and no default there is nothing to serve')
+  writeFileSync(join(config, 'awt.yaml'), 'default-library: local\n')
 
   const dry = awt(['site', 'host', '--dry-run'], {cwd: dir, env})
   assert.equal(dry.status, 0, dry.stderr)
-  assert.match(dry.stdout, /would write:/)
-  assert.ok(!existsSync(join(config, 'host')), 'a dry run wrote nothing')
+  assert.ok(!existsSync(tree), 'a dry run wrote nothing')
 
   const ran = awt(['site', 'host'], {cwd: dir, env})
   assert.equal(ran.status, 0, ran.stderr)
-  assert.match(ran.stdout, /shelton\/dios {2,}hosted {4}no release for this target yet/)
+  assert.match(ran.stdout, /\/wikis\/shelton\/dios\/ +skipped +no release for this library yet/)
   assert.match(ran.stdout, /docker run -d --name awt-host-local --label awt\.host=local/)
-  assert.match(readFileSync(join(config, 'host', 'local', 'conf', 'default.conf'), 'utf8'), /location \/wikis\/shelton\/dios\//)
-  assert.ok(existsSync(join(config, 'host', 'local', 'www', 'index.html')))
+  assert.match(readFileSync(join(tree, 'conf.d', 'default.conf'), 'utf8'), /location \/wikis\/ \{\n {8}alias \/srv\/library\/;/)
+  assert.ok(existsSync(join(tree, 'library', 'index.html')) && existsSync(join(tree, 'library', 'shelton', 'index.html')))
 
-  const remote = awt(['site', 'host', '--target', 'public', '--up'], {cwd: dir, env})
-  assert.equal(remote.status, 2)
-  assert.match(remote.stderr, /not local/)
-  assert.ok(!existsSync(join(config, 'host', 'public')), 'refused before anything was written')
+  const remote = awt(['site', 'host', '--library', 'public', '--up'], {cwd: dir, env})
+  assert.equal(remote.status, 1)
+  assert.match(remote.stderr, /does not deploy to a directory on this machine/)
+  assert.equal(awt(['site', 'host', '--library', 'local', '--target', 'public'], {cwd: dir, env}).status, 2, 'two names for one thing')
   assert.equal(awt(['site', 'host', '--up', '--down'], {cwd: dir, env}).status, 2)
   assert.equal(awt(['site', 'host', '--port', 'x'], {cwd: dir, env}).status, 2)
-  assert.equal(awt(['site', 'host', '--target', 'nope'], {cwd: dir, env}).status, 1)
+  assert.equal(awt(['site', 'host', '--library', 'nope'], {cwd: dir, env}).status, 1)
+
+  const deploy = awt(['site', 'deploy', '--library', 'public', '--dry-run'], {cwd: dir, env})
+  assert.equal(deploy.status, 0, deploy.stderr)
+  assert.match(deploy.stdout, /library public {2}https:\/\/example\.org\/docs {2}-> {2}example:\/srv\/wikis {2}\(dry run\)/)
   rmSync(dir, {recursive: true, force: true})
 })
 
-/** `awt site register` with nothing declared: the mount from the atlas, else the wiki's name. */
-test('register takes a mount from the atlas when the wiki declares none, and says where each value came from', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'awt-register-atlas-'))
+/** `awt site migrate --machine`: the config from before libraries becomes one library per target. */
+test('migrate --machine lifts targets, groups and the registry into libraries and keeps the old files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'awt-migrate-machine-'))
   const config = join(dir, 'config')
-  const bin = join(dir, 'bin')
-  mkdirSync(bin, {recursive: true})
-  mkdirSync(config, {recursive: true})
-  // A stand-in atlas that puts everything under a Shelton workspace.
-  writeFileSync(join(bin, 'atlas'), "#!/bin/sh\nprintf 'atlas: environment maci, catalog /x\\ntype\\tname\\tproject\\tentry\\nworkspace\\tShelton\\tshelton\\t/e/s.md\\n'\n")
-  chmodSync(join(bin, 'atlas'), 0o755)
+  mkdirSync(join(config, 'registry.d'), {recursive: true})
+  mkdirSync(join(config, 'overrides.d'), {recursive: true})
+  writeFileSync(join(config, 'targets.yaml'), 'local:\n  base: http://localhost:8088/wikis\n')
+  writeFileSync(join(config, 'default-target'), 'local\n')
+  writeFileSync(join(config, 'groups'), 'Home IT\nTools\n')
+  writeFileSync(join(config, 'registry.d', 'tools.yaml'), 'filer:\n  mount: filer\n  name: filer\n  site: /x/filer/wiki/site\n')
+  writeFileSync(join(config, 'registry.d', 'home.yaml'), 'homeit:\n  mount: homeit\n  name: homeit\n  site: /x/homeit/wiki/site\n')
+  writeFileSync(join(config, 'overrides.d', 'groups.yaml'), 'filer: {group: Tools}\nhomeit: {group: Home IT}\nelsewhere: {urls: {local: https://example.org/x}}\n')
+  const env = {...process.env, AWT_CONFIG_DIR: config}
 
-  const wikiAt = (name) => {
-    const project = join(dir, name)
-    mkdirSync(join(project, 'wiki', 'notes'), {recursive: true})
-    mkdirSync(join(project, 'wiki', 'site'), {recursive: true})
-    writeFileSync(join(project, 'wiki', 'notes', 'index.md'), '# x\n')
-    writeFileSync(join(project, 'awt.config.mjs'), 'export default {}\n')
-    return project
-  }
-  const withAtlas = {...process.env, AWT_CONFIG_DIR: config, PATH: `${bin}:${process.env.PATH}`}
-  const without = {...process.env, AWT_CONFIG_DIR: config, PATH: '/usr/bin:/bin'}
+  const dry = awt(['site', 'migrate', '--machine', '--dry-run'], {cwd: dir, env})
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.ok(!existsSync(join(config, 'awt.yaml')), 'a dry run wrote nothing')
+  assert.match(dry.stdout, /left out elsewhere: it has an address of its own/)
 
-  const dios = awt(['site', 'register'], {cwd: wikiAt('shelton-dios'), env: withAtlas})
-  assert.equal(dios.status, 0, dios.stderr)
-  assert.match(dios.stdout, /registered dios as shelton\/dios \(mount from the atlas, name from the directory name\)/, 'the mount is taken off the front of the name')
+  const ran = awt(['site', 'migrate', '--machine'], {cwd: dir, env})
+  assert.equal(ran.status, 0, ran.stderr)
+  assert.match(readFileSync(join(config, 'awt.yaml'), 'utf8'), /default-library: local/)
+  const library = readFileSync(join(config, 'libraries', 'local.yaml'), 'utf8')
+  assert.ok(library.indexOf('home-it:') < library.indexOf('tools:'), 'collections in the order of groups')
+  assert.match(library, /deploy:\n {2}to: ~\/\.local\/share\/awt\/libraries\/local\//)
+  assert.ok(existsSync(join(config, 'legacy', 'targets.yaml')) && !existsSync(join(config, 'registry.d')))
 
-  const photo = awt(['site', 'register'], {cwd: wikiAt('photo-cli'), env: withAtlas})
-  assert.match(photo.stdout, /registered photo-cli as shelton\/photo-cli/)
-
-  const alone = awt(['site', 'register'], {cwd: wikiAt('Ghostbusters'), env: without})
-  assert.equal(alone.status, 0, alone.stderr)
-  assert.match(alone.stdout, /registered ghostbusters as ghostbusters\/ghostbusters \(mount from the wiki's own name/, 'with no atlas the wiki is its own mount')
-  assert.ok(existsSync(join(config, 'registry.d', 'shelton.yaml')) && existsSync(join(config, 'registry.d', 'ghostbusters.yaml')))
+  const listed = awt(['site', 'wikis', '--key', 'homeit'], {cwd: dir, env})
+  assert.match(listed.stdout, /local {3}http:\/\/localhost:8088\/wikis\/home-it\/homeit\//)
+  assert.equal(awt(['site', 'migrate', '--machine'], {cwd: dir, env}).status, 1, 'nothing left to migrate')
   rmSync(dir, {recursive: true, force: true})
 })

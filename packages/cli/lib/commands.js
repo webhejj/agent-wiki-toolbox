@@ -175,7 +175,16 @@ const OUTPUT_OPTIONS = {json: {type: 'boolean', default: false}}
 const SITE_OPTIONS = {wiki: {type: 'string'}, site: {type: 'string'}}
 // The address a release is built for. `--wiki` is taken by the notes to render, so the wiki's
 // own name under its mount is `--name`.
-const TARGET_OPTIONS = {base: {type: 'string'}, mount: {type: 'string'}, name: {type: 'string'}, target: {type: 'string'}}
+const TARGET_OPTIONS = {base: {type: 'string'}, mount: {type: 'string'}, name: {type: 'string'}, library: {type: 'string'}, target: {type: 'string'}}
+
+/** The library a command names: --library, or --target, its name from before libraries. Both is a refusal. */
+function libraryFlag(command, values) {
+  if (values.library !== undefined && values.target !== undefined && values.library !== values.target) {
+    process.stderr.write(`awt site ${command}: --library and --target name the same thing; pass --library.\n`)
+    return null
+  }
+  return values.library ?? values.target
+}
 
 /**
  * The one group. A group is a namespace, not an alias — `awt serve` is gone, not
@@ -1269,7 +1278,7 @@ export const COMMANDS = [
     section: 'Publish',
     summary: 'Build the site into a release, or a handoff copy with --offline. Emits the index first',
     usage:
-      'awt site publish [--target name | --base url] [--mount name] [--name name]\n' +
+      'awt site publish [--library name | --base url] [--mount name] [--name name] [--target name]\n' +
       '                 [--out path] [--watch] [--offline] [--diagrams png|none]\n' +
       '                 [--nginx] [--skip-index] [--if-stale]',
     positionals: 0,
@@ -1278,16 +1287,18 @@ export const COMMANDS = [
       'directory, then renames it into place. A failed build leaves the standing release untouched.',
       'The published site it replaces is kept as a hidden -prev beside it; a rollback is a rename.',
       '',
-      'The release is built for one address: a base, a mount and the wiki\'s name under it, served',
-      'at <base>/<mount>/<name>/. They come from --base, --mount and --name, else from site.baseUrl,',
-      'site.mount and site.self in awt.config.mjs. A base may carry a scheme and a path',
-      '(http://localhost:8088/wikis); with no scheme it is https. A project with a base and no mount',
-      'is served at the base itself. --target names one of the deployments in ~/.config/awt/targets.yaml',
-      'for the base instead, and with no base anywhere the target is $AWT_TARGET, site.target or the',
-      'machine\'s default-target; a named target hosts several wikis, so the wiki needs a mount. Any of',
-      'these flags changes where the base is read from, and each target is built into',
-      'build/published/<base>, so two bases built from one checkout do not overwrite each other. The',
-      'published site records its address in static/awtRelease.json for `awt site verify`.',
+      'The release is built for one address. Usually that is a library\'s: --library names one of',
+      '~/.config/awt/libraries/<name>.yaml, else $AWT_LIBRARY, site.target or the machine\'s',
+      'default-library in awt.yaml, and the wiki is served at <base>/<collection path>/<name>/ as the',
+      'library lists it; a wiki the library does not hold is refused (awt site register). --target is',
+      'the old name of --library. --base, --mount and --name give an address outright instead, and',
+      'site.baseUrl, site.mount and site.self in awt.config.mjs are the project\'s own standing one. A',
+      'base may carry a scheme and a path (http://localhost:8088/wikis); with no scheme it is https.',
+      'Each base is built into build/published/<base>, so two built from one checkout do not overwrite',
+      'each other. The published site records its address in static/awtRelease.json for `awt site verify`.',
+      '',
+      'When the library deploys to a directory on this machine, the release is copied into its tree',
+      'after it is swapped in, every rebuild under --watch included: see awt site deploy.',
       '',
       '--watch keeps the build running, for editing a wiki whose release is being read: each save is',
       'rebuilt in about half a second and swapped into the release, which is the same release a',
@@ -1322,6 +1333,8 @@ export const COMMANDS = [
     },
     async run({values}) {
       const {publish, INDEX} = await import('@agent-wiki-toolbox/publish')
+      const library = libraryFlag('publish', values)
+      if (library === null) return 2
 
       // With --if-stale the index is emitted only once the build is known to be needed, so a skipped
       // run writes nothing: publish asks for it through beforeBuild.
@@ -1357,7 +1370,7 @@ export const COMMANDS = [
         ...(values.base ? ['--base', values.base] : []),
         ...(values.mount ? ['--mount', values.mount] : []),
         ...(values.name ? ['--name', values.name] : []),
-        ...(values.target ? ['--target', values.target] : []),
+        ...(library ? ['--target', library] : []),
         ...(values.offline ? ['--offline'] : []),
         ...(values.watch ? ['--watch'] : []),
         ...(values.diagrams ? ['--diagrams', values.diagrams] : []),
@@ -1380,7 +1393,7 @@ export const COMMANDS = [
     group: 'site',
     section: 'Publish',
     summary: 'Check that a release carries the address its project says it is built for',
-    usage: 'awt site verify [--target name | --base url] [--mount name] [--name name] [--out path]',
+    usage: 'awt site verify [--library name | --base url] [--mount name] [--name name] [--target name] [--out path]',
     positionals: 0,
     notes: [
       'Reads static/awtRelease.json from the published site, build/published/<base> or the one a flag names, and',
@@ -1394,6 +1407,8 @@ export const COMMANDS = [
     },
     async run({values}) {
       const {verifyRelease} = await import('@agent-wiki-toolbox/publish')
+      const library = libraryFlag('verify', values)
+      if (library === null) return 2
       const layout = await layoutFor('verify', values)
       if (layout === undefined) return 2
       return verifyRelease([
@@ -1403,7 +1418,7 @@ export const COMMANDS = [
         ...(values.base ? ['--base', values.base] : []),
         ...(values.mount ? ['--mount', values.mount] : []),
         ...(values.name ? ['--name', values.name] : []),
-        ...(values.target ? ['--target', values.target] : []),
+        ...(library ? ['--target', library] : []),
         ...(values.json ? ['--json'] : []),
         ...(await siteArgs(layout)),
       ])
@@ -1414,80 +1429,86 @@ export const COMMANDS = [
     group: 'site',
     section: 'Publish',
     writes: true,
-    summary: "Record this wiki in the machine's registry, so other wikis' links to it resolve",
-    usage: 'awt site register [--key name] [--mount name] [--name name] [--dev] [--force] [--dry-run]',
+    summary: 'Put this wiki in a collection of a library, so it is published and other wikis\' links to it resolve',
+    usage: 'awt site register [--library name] [--collection key] [--key name] [--name name] [--dev] [--force] [--dry-run]',
     positionals: 0,
     notes: [
-      "Writes this wiki's entry into ~/.config/awt/registry.d/<mount>.yaml: its mount and name (from",
-      "the flags or site.mount and site.self; else the mount is the project the atlas puts this checkout",
-      "in, or the wiki's own name, and the name is the directory's with the mount taken off the front),",
-      "the site directory its releases are under, and the",
-      "address of its running serve with --dev, which needs serve.port. Without --dev a dev server's links",
-      "to this wiki go to its release for the default target, which is always up. The key is the link key other wikis write before the",
-      'colon, site.self unless --key says otherwise. Comments in the file are kept.',
+      "Writes this wiki's entry into ~/.config/awt/libraries/<library>.yaml, under the collection's",
+      'wikis: the site directory its releases are under, its name when that is not the key, and the',
+      'address of its running serve with --dev, which needs serve.port. In a library that deploys over',
+      'ssh it also writes repo and path, read from the git remote, when the remote is a hosted one: what',
+      'a pipeline would clone. The library is --library, else the default-library in awt.yaml.',
+      '',
+      'The key is the link key other wikis write before the colon, site.self unless --key says',
+      'otherwise. The collection has to exist in the library, with its path and title: those are the',
+      "library's to choose. A wiki already in the library keeps its collection when --collection is not",
+      'given. The file keeps its comments and its block style.',
       '',
       'Registering what is already registered changes nothing. A different entry under the same key is',
-      'replaced only with --force, and a key already registered under another mount is refused:',
-      'unregister it first.',
+      'replaced only with --force, and a wiki in another collection of the library is refused, since',
+      'moving it changes its address: unregister it first.',
     ],
     options: {
       ...OUTPUT_OPTIONS,
+      library: {type: 'string'},
+      collection: {type: 'string'},
       key: {type: 'string'},
-      mount: {type: 'string'},
       name: {type: 'string'},
       dev: {type: 'boolean', default: false},
       force: {type: 'boolean', default: false},
       'dry-run': {type: 'boolean', default: false},
     },
     async run({values}) {
-      const {registerWiki, configDir, atlasProject} = await import('@agent-wiki-toolbox/publish')
+      const {registerWiki, loadMachine, configDir} = await import('@agent-wiki-toolbox/publish')
+      const {spawnSync} = await import('node:child_process')
+      const path = await import('node:path')
       const layout = await layoutFor('register', values)
       if (layout === undefined || layout === null) return 2
       const projectDir = layout.projectDir ?? process.cwd()
       const {config} = await loadProjectConfig(projectDir)
       const site = config.site ?? {}
-
-      // The mount is the flag, the declaration, the project the atlas puts this checkout in, or the
-      // wiki's own name. The name is the flag, the declaration, or the directory's name with the mount
-      // taken off the front (shelton-dios under shelton is dios). Each says where it came from.
-      const slug = (text) => text.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+|[-.]+$/g, '')
-      const directory = slug(basename(projectDir))
-      let mount = values.mount ?? site.mount
-      let mountFrom = values.mount ? '--mount' : site.mount ? 'site.mount' : null
-      if (!mount) {
-        mount = atlasProject(projectDir) ?? undefined
-        if (mount) mountFrom = 'the atlas'
-      }
-      let name = values.name ?? site.self
-      let nameFrom = values.name ? '--name' : site.self ? 'site.self' : null
-      if (!name) {
-        const stripped = mount && directory.startsWith(`${mount}-`) ? directory.slice(mount.length + 1) : directory
-        name = stripped || directory
-        nameFrom = 'the directory name'
-      }
-      if (!mount) {
-        mount = name
-        mountFrom = 'the wiki\'s own name'
-      }
-      const sources = {mount: mountFrom, name: nameFrom}
       const port = config.serve?.port
       if (values.dev && port === undefined) {
         process.stderr.write('awt site register: --dev records the address of this wiki\'s serve, and serve.port is not set in awt.config.mjs.\n')
         return 2
       }
       try {
-        const result = registerWiki({
-          key: values.key ?? site.self ?? name,
-          entry: {mount, name, site: layout.siteDir, ...(values.dev ? {dev: `http://localhost:${port}`} : {})},
-          force: values.force,
-          dryRun: values['dry-run'],
-        })
-        emit(values, {ok: true, key: values.key ?? site.self ?? name, ...result, sources, dir: configDir()}, (value) => {
-          const from = `(mount from ${sources.mount}, name from ${sources.name})`
-          return value.changed
-            ? `${value.dryRun ? 'would have ' : ''}${value.created ? 'created ' : 'updated '}${value.file}\n${value.dryRun ? 'would register' : 'registered'} ${value.key} as ${mount}/${name} ${from}`
-            : `${value.key} is already registered as ${mount}/${name}, unchanged ${from}`
-        })
+        const machine = loadMachine({})
+        const library = values.library ?? machine.defaultTarget
+        if (!library) {
+          process.stderr.write('awt site register: no library: pass --library or set default-library in awt.yaml.\n')
+          return 2
+        }
+        const key = values.key ?? site.self ?? basename(projectDir).toLowerCase()
+        const lib = machine.targets.get(library)
+        const collection = values.collection ?? lib?.members.get(key)?.collection
+        if (lib && !collection) {
+          process.stderr.write(`awt site register: pass --collection; ${library} has ${lib.collections.map((c) => c.key).join(', ') || 'no collections'}.\n`)
+          return 2
+        }
+
+        // What a pipeline would clone: only a hosted remote, since a path on this machine or another is no address elsewhere.
+        let source = {}
+        if (lib?.deploy?.remote) {
+          const git = (...args) => spawnSync('git', ['-C', projectDir, ...args], {encoding: 'utf8'})
+          const remote = git('remote', 'get-url', 'origin').stdout?.trim()
+          const top = git('rev-parse', '--show-toplevel').stdout?.trim()
+          if (remote && top && /^(git@|https?:\/\/|ssh:\/\/)/.test(remote)) {
+            source = {repo: remote, path: path.relative(top, path.dirname(layout.siteDir)) || '.'}
+          }
+        }
+        const entry = {
+          ...(values.name ? {name: values.name} : {}),
+          site: layout.siteDir,
+          ...(values.dev ? {dev: `http://localhost:${port}`} : {}),
+          ...source,
+        }
+        const result = registerWiki({library, collection, key, entry, force: values.force, dryRun: values['dry-run']})
+        emit(values, {ok: true, key, library, collection, ...result, dir: configDir()}, (value) =>
+          value.changed
+            ? `${value.dryRun ? 'would register' : 'registered'} ${key} in ${library}, collection ${collection}\n  ${value.file}`
+            : `${key} is already in ${library}, collection ${collection}, unchanged`,
+        )
         return 0
       } catch (error) {
         process.stderr.write(`awt site register: ${error.message}\n`)
@@ -1501,17 +1522,22 @@ export const COMMANDS = [
     section: 'Publish',
     writes: true,
     declines: ['wiki', 'site'],
-    summary: "Remove a wiki from the machine's registry",
-    usage: 'awt site unregister <key> [--dry-run]',
+    summary: 'Take a wiki out of a library',
+    usage: 'awt site unregister <key> [--library name] [--dry-run]',
     positionals: 1,
-    notes: ['Removes the entry from the registry file that holds it, and the file too when it held no other.'],
-    options: {...OUTPUT_OPTIONS, 'dry-run': {type: 'boolean', default: false}},
+    notes: ['Removes the entry from its collection in the library file, else the default library. Its copy in the tree stays until the tree is rebuilt.'],
+    options: {...OUTPUT_OPTIONS, library: {type: 'string'}, 'dry-run': {type: 'boolean', default: false}},
     async run({values, positionals}) {
-      const {unregisterWiki} = await import('@agent-wiki-toolbox/publish')
+      const {unregisterWiki, readDefaultTarget} = await import('@agent-wiki-toolbox/publish')
       try {
-        const result = unregisterWiki({key: positionals[0], dryRun: values['dry-run']})
-        emit(values, {ok: true, key: positionals[0], ...result}, (value) =>
-          `${value.dryRun ? 'would remove' : 'removed'} ${value.key} from ${value.file}${value.fileRemoved ? ' (the file held no other wiki and is removed)' : ''}`,
+        const library = values.library ?? readDefaultTarget()
+        if (!library) {
+          process.stderr.write('awt site unregister: no library: pass --library or set default-library in awt.yaml.\n')
+          return 2
+        }
+        const result = unregisterWiki({library, key: positionals[0], dryRun: values['dry-run']})
+        emit(values, {ok: true, key: positionals[0], library, ...result}, (value) =>
+          `${value.dryRun ? 'would remove' : 'removed'} ${value.key} from ${library}, collection ${value.collection}\n  ${value.file}`,
         )
         return 0
       } catch (error) {
@@ -1525,13 +1551,12 @@ export const COMMANDS = [
     group: 'site',
     section: 'Publish',
     declines: ['wiki', 'site'],
-    summary: "The machine's targets and registered wikis, with the address each has per target and where each field came from",
+    summary: "The machine's libraries, their collections, and each wiki's address in each library",
     usage: 'awt site wikis [--key name]',
     positionals: 0,
     notes: [
-      'Reads ~/.config/awt (or $AWT_CONFIG_DIR): targets.yaml, default-target, registry.d and',
-      'overrides.d, and merges the overrides over the registry. A field set by an override says so.',
-      'The wiki-level overrides in a project\'s awt.config.mjs are not shown: this is the machine.',
+      'Reads ~/.config/awt (or $AWT_CONFIG_DIR): awt.yaml and libraries/*.yaml.',
+      'The wiki-level settings in a project\'s awt.config.mjs are not shown: this is the machine.',
     ],
     options: {...OUTPUT_OPTIONS, key: {type: 'string'}},
     async run({values}) {
@@ -1544,19 +1569,16 @@ export const COMMANDS = [
           return 1
         }
         emit(values, view, (value) => {
-          const where = (file) => (file ? `  <- ${file.startsWith(value.dir) ? file.slice(value.dir.length + 1) : file}` : '')
           const lines = [`config: ${value.dir}`]
-          lines.push(value.targets.length ? 'targets:' : 'targets: none (targets.yaml)')
-          for (const t of value.targets) lines.push(`  ${t.name.padEnd(10)}${t.base}${t.default ? '  (default)' : ''}`)
+          lines.push(value.targets.length ? 'libraries:' : 'libraries: none (libraries/*.yaml)')
+          for (const t of value.targets) {
+            lines.push(`  ${t.name.padEnd(10)}${t.base}${t.default ? '  (default)' : ''}${t.deploy ? `  -> ${t.deploy}` : ''}`)
+            if (!values.key) for (const c of t.collections) lines.push(`    ${c.path.padEnd(18)}${c.title}  (${c.wikis.length})`)
+          }
           lines.push(value.wikis.length ? 'wikis:' : 'wikis: none registered')
           for (const w of value.wikis) {
-            lines.push(`  ${w.key}${w.mount ? `  ${w.mount}/${w.name}` : ''}`)
-            for (const field of ['mount', 'name', 'site', 'dev']) {
-              if (w[field] && w.from[field] && !['mount', 'name'].includes(field)) lines.push(`    ${field.padEnd(8)}${w[field]}${where(w.from[field])}`)
-            }
-            for (const [target, url] of Object.entries(w.addresses)) {
-              if (url) lines.push(`    ${target.padEnd(8)}${url}${where(w.from[`urls.${target}`])}`)
-            }
+            lines.push(`  ${w.key}${w.site ? `  ${w.site}` : ''}${w.dev ? `  dev ${w.dev}` : ''}`)
+            for (const [target, url] of Object.entries(w.addresses)) if (url) lines.push(`    ${target.padEnd(8)}${url}`)
           }
           return lines.join('\n')
         })
@@ -1568,32 +1590,81 @@ export const COMMANDS = [
     },
   },
   {
+    name: 'deploy',
+    group: 'site',
+    section: 'Publish',
+    writes: true,
+    declines: ['wiki', 'site'],
+    summary: "Copy a library's releases into its tree, with its pages and nginx config",
+    usage: 'awt site deploy [--library name] [--key name] [--dry-run]',
+    positionals: 0,
+    notes: [
+      "A library's deploy.to is a directory, or host:path over ssh, holding library/, the tree laid out",
+      "as the library's URLs, and conf.d/, the nginx config. Deploy writes the landing page, a page per",
+      "collection and the config, then copies each wiki's release from build/published/<base>/ in its",
+      'checkout with rsync --delay-updates --delete. A wiki with no release for the library, or no site',
+      'on this machine, is listed and skipped. --key copies one wiki\'s release and nothing else.',
+      '',
+      'A server mounts the two at /srv/library/ and /etc/nginx/conf.d/, and an htpasswd file named in',
+      'access.basic at /etc/nginx/htpasswd/<name>. awt site host is that server for a local library.',
+      'A publish for a library that deploys to a directory here copies its release in by itself.',
+    ],
+    options: {...OUTPUT_OPTIONS, library: {type: 'string'}, key: {type: 'string'}, 'dry-run': {type: 'boolean', default: false}},
+    async run({values}) {
+      const {loadMachine, planDeploy, runDeploy} = await import('@agent-wiki-toolbox/publish')
+      try {
+        const machine = loadMachine({})
+        const name = values.library ?? process.env.AWT_LIBRARY ?? machine.defaultTarget
+        if (!name) {
+          process.stderr.write('awt site deploy: no library: pass --library or set default-library in awt.yaml.\n')
+          return 2
+        }
+        const plan = planDeploy({machine, libraryName: name, only: values.key ?? null})
+        if (values.key && plan.wikis.length === 0) {
+          process.stderr.write(`awt site deploy: the library ${name} has no wiki "${values.key}".\n`)
+          return 1
+        }
+        const steps = runDeploy(plan, {pages: !values.key, dryRun: values['dry-run']})
+        emit(values, {ok: true, library: name, to: plan.to.spec, dryRun: values['dry-run'], wikis: plan.wikis, steps}, () => {
+          const lines = [`library ${name}  ${plan.base}  ->  ${plan.to.spec}${values['dry-run'] ? '  (dry run)' : ''}`]
+          for (const w of plan.wikis) {
+            const step = steps.find((s) => s.key === w.key)
+            lines.push(`  ${w.path.padEnd(28)}${w.state === 'ready' ? `${values['dry-run'] ? 'would copy' : 'copied'}${step?.ms !== undefined && !values['dry-run'] ? ` in ${step.ms} ms` : ''}` : `skipped   ${w.reason}`}`)
+          }
+          return lines.join('\n')
+        })
+        return 0
+      } catch (error) {
+        process.stderr.write(`awt site deploy: ${error.message}\n`)
+        return 1
+      }
+    },
+  },
+  {
     name: 'host',
     group: 'site',
     section: 'Publish',
     writes: true,
     declines: ['wiki', 'site'],
-    summary: "Generate an nginx config and a landing page for a target's releases, and run them in Docker",
-    usage: 'awt site host [--target name] [--port N] [--up | --down] [--dry-run]',
+    summary: "Deploy a local library and serve its tree with nginx in Docker",
+    usage: 'awt site host [--library name] [--target name] [--port N] [--up | --down] [--dry-run]',
     positionals: 0,
     notes: [
-      "Serves every registered wiki's release for one target from one address, so a target's base such",
-      'as http://localhost:8088/wikis lists the wikis at its root and each at <mount>/<name>/. The',
-      'wikis, their mounts and where their releases are come from the machine layer: awt site wikis.',
+      'Runs awt site deploy for the library, which has to deploy to a directory on this machine, then',
+      "serves its tree the way any server would: nginx:alpine mounting <to>/library at /srv/library and",
+      "<to>/conf.d at /etc/nginx/conf.d. Without --up that is all, and the docker command is printed.",
+      '--up runs it in a container named awt-host-<library>, replacing one that awt started and',
+      "refusing to touch any other, bound to 127.0.0.1 on the base's port, then asks the server what it",
+      'serves. --down removes the container.',
       '',
-      'Writes conf/default.conf and www/index.html under ~/.config/awt/host/<target>/. Without --up that',
-      'is all, and the docker command to run is printed. --up runs nginx:alpine in a container named',
-      'awt-host-<target>, replacing one that awt started and refusing to touch any other, bound to',
-      "127.0.0.1 on the target's port, then asks the server what it serves. --down removes the container.",
-      '',
-      "Each wiki's site directory is mounted read-only and the release is served from inside it, so a",
-      'release replaced by awt site publish --watch is the one served, and a wiki published after this ran',
-      'needs nothing done. A wiki added to the registry, or one whose release went somewhere else, needs',
-      'this run again. Docker has to be able to read the site directories: on macOS it shares /Users.',
-      'The target\'s base has to be local for --up. The target is --target, $AWT_TARGET or default-target.',
+      'A publish copies its release into the tree, so a wiki published after this ran needs nothing',
+      'done. A library whose collections changed needs this, or awt site deploy, run again. Docker has',
+      'to be able to read the tree: on macOS it shares /Users. The library is --library, $AWT_LIBRARY or',
+      'the default-library; --target is its old name.',
     ],
     options: {
       ...OUTPUT_OPTIONS,
+      library: {type: 'string'},
       target: {type: 'string'},
       port: {type: 'string'},
       up: {type: 'boolean', default: false},
@@ -1601,8 +1672,7 @@ export const COMMANDS = [
       'dry-run': {type: 'boolean', default: false},
     },
     async run({values}) {
-      const {loadMachine, configDir, planHost, writeHost, up, down, probe} = await import('@agent-wiki-toolbox/publish')
-      const path = await import('node:path')
+      const {loadMachine, planDeploy, runDeploy, planHost, up, down, probe} = await import('@agent-wiki-toolbox/publish')
       if (values.up && values.down) {
         process.stderr.write('awt site host: --up and --down are opposites; pass one.\n')
         return 2
@@ -1611,11 +1681,13 @@ export const COMMANDS = [
         process.stderr.write(`awt site host: --port takes a number, not ${values.port}.\n`)
         return 2
       }
+      const flag = libraryFlag('host', values)
+      if (flag === null) return 2
       try {
         const machine = loadMachine({})
-        const name = values.target ?? process.env.AWT_TARGET ?? machine.defaultTarget
+        const name = flag ?? process.env.AWT_LIBRARY ?? process.env.AWT_TARGET ?? machine.defaultTarget
         if (!name) {
-          process.stderr.write('awt site host: no target: pass --target, set $AWT_TARGET or write default-target.\n')
+          process.stderr.write('awt site host: no library: pass --library or set default-library in awt.yaml.\n')
           return 2
         }
         if (values.down) {
@@ -1624,14 +1696,13 @@ export const COMMANDS = [
           return 0
         }
 
-        const plan = planHost({machine, targetName: name, dir: path.join(configDir(), 'host', name), port: values.port})
+        const deploy = planDeploy({machine, libraryName: name})
+        const plan = planHost({machine, targetName: name, deploy, port: values.port})
         if (values.up && !plan.local) {
-          process.stderr.write(
-            `awt site host: --up runs a server on this machine, and the base of "${name}" is ${plan.base}, which is not local.\n`,
-          )
+          process.stderr.write(`awt site host: --up runs a server on this machine, and the base of "${name}" is ${plan.base}, which is not local.\n`)
           return 2
         }
-        const written = values['dry-run'] ? [] : writeHost(plan)
+        const steps = runDeploy(deploy, {dryRun: values['dry-run']})
         let served = null
         if (values.up && !values['dry-run']) {
           up(plan)
@@ -1639,25 +1710,15 @@ export const COMMANDS = [
         }
 
         const failed = served && (served.landing !== 200 || served.wikis.some((w) => !w.serving && w.note.includes('does not see')))
-        emit(values, {ok: !failed, target: name, base: plan.base, port: plan.port, dryRun: values['dry-run'], written, wikis: plan.wikis, docker: plan.docker, served}, () => {
-          const show = (p) => (p.startsWith(configDir()) ? `~/.config/awt${p.slice(configDir().length)}`.replace(/^~\/\.config\/awt/, '<config>') : p)
-          const lines = [`target ${name}  ${plan.base}  (port ${plan.port})`]
-          lines.push(values['dry-run'] ? 'would write:' : 'wrote:')
-          for (const file of values['dry-run'] ? Object.keys(plan.files).map((f) => path.join(plan.dir, f)) : written) lines.push(`  ${show(file)}`)
+        emit(values, {ok: !failed, library: name, base: plan.base, port: plan.port, dir: plan.dir, dryRun: values['dry-run'], steps, wikis: plan.wikis, docker: plan.docker, served}, () => {
+          const lines = [`library ${name}  ${plan.base}  (port ${plan.port})`, `tree    ${plan.dir}`]
           lines.push(plan.wikis.length ? 'wikis:' : 'wikis: none registered (awt site register)')
           for (const w of plan.wikis) {
-            const where = w.mount ? `${w.mount}/${w.name}` : w.key
             const answer = served?.wikis.find((x) => x.key === w.key)
-            const state =
-              w.state === 'hosted'
-                ? `hosted    ${answer ? answer.note : w.published ? `release at ${w.release}` : 'no release for this target yet'}`
-                : w.state === 'external'
-                  ? `external  ${w.url}`
-                  : `skipped   ${w.reason}`
-            lines.push(`  ${where.padEnd(28)}${state}`)
+            lines.push(`  ${w.path.padEnd(32)}${answer ? answer.note : w.state === 'ready' ? (values['dry-run'] ? 'would copy' : 'copied') : `skipped   ${w.reason}`}`)
           }
           if (served) lines.push(served.landing === 200 ? `\nserving at http://localhost:${plan.port}${new URL(plan.base).pathname.replace(/\/+$/, '')}/` : `\nthe server answered ${served.landing || 'nothing'} for the landing page`)
-          else if (!values['dry-run']) lines.push(`\nto serve it: awt site host --target ${name} --up\n  or: docker ${plan.docker.args.join(' ')}`)
+          else if (!values['dry-run']) lines.push(`\nto serve it: awt site host --library ${name} --up\n  or: docker ${plan.docker.args.join(' ')}`)
           return lines.join('\n')
         })
         return failed ? 1 : 0
@@ -1945,8 +2006,8 @@ export const COMMANDS = [
     section: 'Publish',
     writes: true,
     declines: ['wiki'],
-    summary: "Lift a tracked site/quartz.config.yaml into the `site` declaration in awt.config.mjs",
-    usage: 'awt site migrate [--dry-run]',
+    summary: "Lift a tracked site/quartz.config.yaml into awt.config.mjs, or with --machine the old machine config into libraries",
+    usage: 'awt site migrate [--machine] [--dry-run]',
     positionals: 0,
     notes: [
       'For a project from before the toolbox derived the Quartz config. Reads the tracked file, pulls',
@@ -1956,9 +2017,32 @@ export const COMMANDS = [
       '',
       'Anything else the file changed from Quartz\'s default is not carried; the report names the file',
       'so it can be diffed before it goes. --dry-run prints the block and changes nothing.',
+      '',
+      '--machine lifts ~/.config/awt from before libraries instead: targets.yaml, default-target, groups,',
+      'registry.d and overrides.d become awt.yaml and libraries/<target>.yaml, one library per target',
+      'with every registered wiki in it, a collection per group in the order of groups, and a local',
+      'target deploying to ~/.local/share/awt/libraries/<target>/. The old files move to legacy/. A wiki',
+      'with an address of its own (urls) is reported and left out. --dry-run prints the files.',
     ],
-    options: {...OUTPUT_OPTIONS, 'dry-run': {type: 'boolean', default: false}},
+    options: {...OUTPUT_OPTIONS, machine: {type: 'boolean', default: false}, 'dry-run': {type: 'boolean', default: false}},
     async run({values}) {
+      if (values.machine) {
+        const {migrateMachine} = await import('@agent-wiki-toolbox/publish')
+        try {
+          const result = await migrateMachine({dryRun: values['dry-run']})
+          emit(values, {ok: true, ...result}, (v) => {
+            const lines = []
+            for (const [rel, text] of Object.entries(v.files)) lines.push(v.dryRun ? `--- ${rel}\n${text}` : `wrote ${rel}`)
+            lines.push(`${v.dryRun ? 'would move' : 'moved'} to legacy/: ${v.moved.join(', ')}`)
+            for (const s of v.skipped) lines.push(`left out ${s.key}: ${s.reason}`)
+            return `config: ${v.dir}\n${lines.join('\n')}`
+          })
+          return 0
+        } catch (error) {
+          process.stderr.write(`awt site migrate: ${error.message}\n`)
+          return 1
+        }
+      }
       const {extractDeclaration, renderDeclaration, PROJECT_CONFIG, DERIVED_CONFIG} = await import('@agent-wiki-toolbox/publish')
       const layout = values.site ? null : await resolveLayout()
       const site = values.site ? resolvePath(values.site) : layout?.siteDir

@@ -92,15 +92,17 @@ awt site publish --base http://localhost:8088/wikis --mount shelton --name dios
                                  # …for one address: <base>/<mount>/<name>/
 awt site publish --watch         # keep the published site current while you edit: a save is live in about a second
 awt site publish --if-stale      # rebuild only if a note is newer than the standing release; never a first release (what the Stop hook runs)
-awt site publish --target local  # …for a deployment named in ~/.config/awt/targets.yaml
+awt site publish --library proton  # …for a library in ~/.config/awt/libraries/proton.yaml, at its collection's path
 awt site verify                  # does the published site carry the address this project says it is built for?
-awt site register                # record this wiki in ~/.config/awt/registry.d, so links to it resolve
-awt site wikis                   # the machine's targets and wikis, and where each field came from
-awt site unregister dios         # take a wiki out of the registry
+awt site register --collection tools  # put this wiki in a collection of the default library (--library for another)
+awt site wikis                   # the machine's libraries and collections, and each wiki's address in each
+awt site unregister dios         # take a wiki out of a library
+awt site deploy --library proton # copy a library's releases, pages and nginx config to its deploy.to, by rsync
 awt site clean                   # remove wiki/site/build/, which holds everything awt generates; --legacy for the old loose files
-awt site host --up               # serve every registered wiki's release from one address: nginx in Docker
+awt site host --up               # deploy the local library and serve its tree: nginx in Docker
 awt site index                   # just the artifact the Quartz plugin reads
 awt site migrate                 # lift a tracked quartz.config.yaml into awt.config.mjs
+awt site migrate --machine       # lift targets.yaml and registry.d into awt.yaml and libraries/
 ```
 
 **Everything `awt` generates for a site is in `wiki/site/build/`**, and that directory ignores itself, so a

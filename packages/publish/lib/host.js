@@ -1,134 +1,53 @@
 /**
- * `awt site host`: serve the machine's releases from one address, with a stock nginx.
+ * `awt site host`: run a library's server on this machine, with a stock nginx.
  *
- * The releases are static directories and the machine layer says where every wiki's are, so what is
- * left to serve them is configuration: one nginx `server` mapping `<base>/<mount>/<name>/` to each
- * wiki's release, a landing page that lists the wikis and says which have a release, and a container
- * to run it in. Nothing of ours stays resident; the server is nginx and the processes that keep a
- * release current are `awt site publish --watch`, started by whoever is editing.
+ * `awt site deploy` lays a library out as a tree and writes the nginx config beside it, in the
+ * library's `deploy.to`; what is left to serve it is a container that mounts the two, the same
+ * contract a server elsewhere follows:
  *
- * EACH WIKI'S SITE DIRECTORY IS MOUNTED, NOT ITS RELEASE. A release is replaced by a rename, and a
- * bind mount of the directory pins the directory it was made from: after the first swap the container
- * would go on serving the release that was replaced, now a hidden `-prev` beside it. Mounting the site directory
- * and serving a path inside it sees every swap, and a wiki that has no release yet needs no restart
- * once it has one.
+ *     <to>/library/   ->  /srv/library/        the tree
+ *     <to>/conf.d/    ->  /etc/nginx/conf.d/   the config
+ *
+ * Nothing of ours stays resident; the server is nginx, and what keeps the tree current is publish,
+ * which copies a release into it after each swap.
  *
  * DOCKER MOUNTS DIRECTORIES, AND ONLY WHAT IT SHARES. A single file mounted as a config failed outright
- * and a directory in an unshared path arrived empty, so the config and the page are two directories
- * under the config directory and `up` checks what the container can actually see.
+ * and a directory in an unshared path arrived empty, so the two are directories and `probe` checks what
+ * the container can actually see.
  */
 import { spawnSync } from "node:child_process"
-import nodeFs from "node:fs"
 import path from "node:path"
-
-import { PUBLISHED } from "./layout.js"
-import { addressOf, releaseFor } from "./machine.js"
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
 
-/** `awt-host-<target>`: the container is named for the target it serves, and labelled so it is known as ours. */
+/** `awt-host-<library>`: the container is named for the library it serves, and labelled so it is known as ours. */
 export const containerName = (targetName) => `awt-host-${targetName}`
 export const LABEL = "awt.host"
 
-/** Escape `<` so a JSON document can sit inside a `<script>` element whatever the data holds. */
-const jsonForScript = (value) => JSON.stringify(value).replace(/</g, "\\u003c")
-
 /**
- * What to serve for one target, as data: the files to write, the volumes and the arguments of the
- * container, and what became of each wiki. Pure over the machine layer and the disk it points at.
+ * The container for one library, as data. The deploy plan says what is in the tree; this says how it
+ * is served.
  *
  *   machine      from `loadMachine`
- *   targetName   which target's address and releases
- *   dir          where the files will be written, which is what the container mounts
- *   port         the port on this machine; the target's own port when not given
+ *   targetName   which library
+ *   deploy       its deploy plan, from `planDeploy`
+ *   port         the port on this machine; the library's own port when not given
  */
-export function planHost({ machine, targetName, dir, port }) {
+export function planHost({ machine, targetName, deploy, port }) {
   const target = machine.targets.get(targetName)
   if (!target) {
-    throw new Error(`no target "${targetName}"${machine.targets.size ? `; targets are ${[...machine.targets.keys()].join(", ")}` : "; targets.yaml defines none"}.`)
+    throw new Error(`no library "${targetName}"${machine.targets.size ? `; libraries are ${[...machine.targets.keys()].join(", ")}` : ""}.`)
+  }
+  if (!target.deploy || target.deploy.remote) {
+    throw new Error(`the library "${targetName}" does not deploy to a directory on this machine, so there is no tree here to serve.`)
   }
   const url = new URL(target.base)
   const basePath = url.pathname.replace(/\/+$/, "")
   const hostPort = Number(port ?? (url.port || (url.protocol === "https:" ? 443 : 80)))
   const local = LOCAL_HOSTS.has(url.hostname)
+  const root = target.deploy.path
 
-  const wikis = []
-  const volumes = []
-  for (const entry of [...machine.wikis.values()].sort((a, b) => a.key.localeCompare(b.key))) {
-    const base = { key: entry.key, mount: entry.mount ?? null, name: entry.name ?? null, ...(entry.group ? { group: entry.group } : {}) }
-    const own = entry.urls?.[targetName]
-    if (own) {
-      wikis.push({ ...base, state: "external", url: `${own.replace(/\/+$/, "")}/` })
-      continue
-    }
-    if (!entry.mount || !entry.name) {
-      wikis.push({ ...base, state: "skipped", reason: "it has no mount and name, which are its address" })
-      continue
-    }
-    if (!entry.site) {
-      wikis.push({ ...base, state: "skipped", reason: "it has no site directory to serve releases from" })
-      continue
-    }
-    // Docker creates a bind mount's source when it is missing, on the host, inside whatever project
-    // the path is in. A wiki that has never had `awt site setup` run has no site directory, and is
-    // listed with the way to give it one.
-    if (!nodeFs.existsSync(entry.site)) {
-      wikis.push({ ...base, state: "skipped", reason: `its site directory ${entry.site} does not exist; run awt site setup in it` })
-      continue
-    }
-    const address = addressOf(entry, target)
-    const found = releaseFor(entry, target, address)
-    const inside = found ? path.relative(entry.site, found) : path.join(PUBLISHED, target.slug)
-    const container = `/srv/${entry.mount}/${entry.name}`
-    volumes.push({ host: entry.site, container, mode: "ro" })
-    wikis.push({
-      ...base,
-      state: "hosted",
-      url: `${address}/`,
-      path: `${basePath}/${entry.mount}/${entry.name}/`,
-      site: entry.site,
-      release: inside.split(path.sep).join("/"),
-      published: Boolean(found),
-      container,
-    })
-  }
-
-  const hosted = wikis.filter((w) => w.state === "hosted")
-  const landing = `${basePath}/`
-  const conf = [
-    `# Generated by awt site host for the target "${targetName}" (${target.base}). Do not edit: it is rewritten.`,
-    "# Each wiki's site directory is mounted and a release is served from inside it, so a release that is",
-    "# replaced by a rename is the one that is served.",
-    "server {",
-    "    listen 80;",
-    "    server_name _;",
-    "    # The container listens on 80 and is reached on another port, so a redirect must not name one.",
-    "    absolute_redirect off;",
-    "    # A release is replaced in place, and a browser given no lifetime guesses one from Last-Modified and keeps",
-    "    # serving the old menu data. no-cache keeps the copy but revalidates it by ETag on every load.",
-    '    add_header Cache-Control "no-cache" always;',
-    "",
-    ...(basePath ? [`    location = ${basePath} { return 301 ${landing}; }`, ""] : []),
-    `    location = ${landing} {`,
-    "        # root and a rewrite, not alias: with an alias on a file nginx appends the index name to it.",
-    "        root /srv/awt-host;",
-    "        rewrite ^ /index.html break;",
-    "    }",
-    ...hosted.flatMap((w) => [
-      "",
-      `    location = ${w.path.slice(0, -1)} { return 301 ${w.path}; }`,
-      `    location ${w.path} {`,
-      `        alias ${w.container}/${w.release}/;`,
-      "        # Quartz emits extensionless addresses, so a page is the file, the file with .html, or a folder's index.",
-      "        try_files $uri $uri.html $uri/index.html =404;",
-      "    }",
-    ]),
-    "}",
-    "",
-  ].join("\n")
-
-  const page = landingPage({ targetName, base: target.base, wikis, groupOrder: machine.groupOrder ?? [] })
-
+  const wikis = deploy.wikis.map((w) => ({ ...w, path: `${basePath}/${w.path}/` }))
   const name = containerName(targetName)
   const args = [
     "run",
@@ -142,127 +61,16 @@ export function planHost({ machine, targetName, dir, port }) {
     "-p",
     `127.0.0.1:${hostPort}:80`,
     "-v",
-    `${path.join(dir, "conf")}:/etc/nginx/conf.d:ro`,
+    `${path.join(root, "conf.d")}:/etc/nginx/conf.d:ro`,
     "-v",
-    `${path.join(dir, "www")}:/srv/awt-host:ro`,
-    ...volumes.flatMap((v) => ["-v", `${v.host}:${v.container}:${v.mode}`]),
+    `${path.join(root, "library")}:/srv/library:ro`,
     "nginx:alpine",
   ]
 
-  return {
-    target: targetName,
-    base: target.base,
-    local,
-    port: hostPort,
-    dir,
-    wikis,
-    files: { [path.join("conf", "default.conf")]: conf, [path.join("www", "index.html")]: page },
-    docker: { name, args },
-  }
-}
-
-/**
- * The page at the base: every wiki, grouped by its `group` (its mount when it has none), groups in `groupOrder`, wikis by name, with whether it has a release for this target.
- * The list is written in; the state is read in the browser from each release's own record, so the page
- * is right after a publish without being generated again.
- */
-export function landingPage({ targetName, base, wikis, groupOrder = [] }) {
-  const data = wikis.map((w) => ({ key: w.key, mount: w.mount, name: w.name, group: w.group ?? null, state: w.state, url: w.url ?? null, path: w.path ?? null, reason: w.reason ?? null }))
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wikis</title>
-<style>
-  :root { --bg: #fbfaf8; --fg: #1f1d1a; --muted: #6f6a62; --line: #e4e0d8; --ok: #2f7d4f; --warn: #a15c10; --card: #fff; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #171614; --fg: #ece8e1; --muted: #9d968b; --line: #302d29; --ok: #62b886; --warn: #d8a05a; --card: #1f1d1a; } }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
-  main { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
-  h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
-  p.meta { color: var(--muted); margin: 0 0 2rem; font-size: .9rem; }
-  h2 { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 2rem 0 .5rem; }
-  ul { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: .5rem; background: var(--card); }
-  li { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; padding: .7rem 1rem; border-top: 1px solid var(--line); }
-  li:first-child { border-top: 0; }
-  a { color: inherit; text-decoration: none; font-weight: 600; }
-  a:hover { text-decoration: underline; }
-  .state { font-size: .85rem; color: var(--muted); text-align: right; }
-  .state.ok { color: var(--ok); }
-  .state.warn { color: var(--warn); }
-  .empty { color: var(--muted); }
-</style>
-</head>
-<body>
-<main>
-  <h1>Wikis</h1>
-  <p class="meta">Target <strong id="target"></strong> at <span id="base"></span></p>
-  <div id="groups"></div>
-</main>
-<script>
-const TARGET = ${jsonForScript(targetName)}
-const BASE = ${jsonForScript(base)}
-const GROUP_ORDER = ${jsonForScript(groupOrder)}
-const WIKIS = ${jsonForScript(data)}
-document.getElementById('target').textContent = TARGET
-document.getElementById('base').textContent = BASE
-
-const groups = {}
-for (const wiki of WIKIS) (groups[wiki.group ?? wiki.mount ?? 'unplaced'] ??= []).push(wiki)
-const rank = (g) => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? GROUP_ORDER.length : i }
-const label = (w) => w.name ?? w.key
-const sections = Object.entries(groups)
-  .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
-  .map(([group, wikis]) => [group, wikis.sort((a, b) => label(a).localeCompare(label(b)))])
-
-const root = document.getElementById('groups')
-const cells = new Map()
-for (const [group, wikis] of sections) {
-  const h = document.createElement('h2'); h.textContent = group; root.append(h)
-  const ul = document.createElement('ul'); root.append(ul)
-  for (const wiki of wikis) {
-    const li = document.createElement('li')
-    const name = document.createElement(wiki.state === 'skipped' ? 'span' : 'a')
-    name.textContent = wiki.name ?? wiki.key
-    if (wiki.state === 'hosted') name.href = wiki.mount + '/' + wiki.name + '/'
-    if (wiki.state === 'external') name.href = wiki.url
-    const state = document.createElement('span'); state.className = 'state'
-    li.append(name, state); ul.append(li)
-    cells.set(wiki, state)
-  }
-}
-
-const when = (iso) => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString() }
-async function refresh() {
-  for (const [wiki, cell] of cells) {
-    if (wiki.state === 'skipped') { cell.textContent = 'not served: ' + wiki.reason; cell.className = 'state warn'; continue }
-    if (wiki.state === 'external') { cell.textContent = 'hosted elsewhere'; cell.className = 'state'; continue }
-    try {
-      const r = await fetch(wiki.mount + '/' + wiki.name + '/static/awtRelease.json', { cache: 'no-store' })
-      if (r.ok) { const rec = await r.json(); cell.textContent = 'published ' + when(rec.builtAt); cell.className = 'state ok' }
-      else { cell.textContent = 'no release for this target yet'; cell.className = 'state warn' }
-    } catch { cell.textContent = 'cannot be reached'; cell.className = 'state warn' }
-  }
-}
-refresh(); setInterval(refresh, 15000)
-</script>
-</body>
-</html>
-`
+  return { target: targetName, base: target.base, local, port: hostPort, dir: root, wikis, docker: { name, args } }
 }
 
 // ---------------------------------------------------------------------- doing it
-
-/** Write the plan's files under its directory. A file is replaced whole: they are generated. */
-export function writeHost(plan, { fs = nodeFs } = {}) {
-  for (const [relative, text] of Object.entries(plan.files)) {
-    const file = path.join(plan.dir, relative)
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, text)
-  }
-  return Object.keys(plan.files).map((relative) => path.join(plan.dir, relative))
-}
 
 const docker = (args, run) => run("docker", args, { encoding: "utf8" })
 
@@ -295,8 +103,8 @@ export function down(targetName, { run = spawnSync } = {}) {
 
 /**
  * Ask the running server what it serves: the landing page and each wiki, retried for a few seconds
- * while nginx starts. A wiki whose release exists on disk but answers 404 is one the container cannot
- * see, and Docker not sharing its path is the usual reason, so that is what the answer says.
+ * while nginx starts. A wiki copied into the tree that answers 404 is one the container cannot see,
+ * and Docker not sharing the tree is the usual reason, so that is what the answer says.
  */
 export async function probe(plan, { get = fetchStatus, wait = 5000, now = Date.now, sleep = delay } = {}) {
   const origin = `http://127.0.0.1:${plan.port}`
@@ -308,7 +116,7 @@ export async function probe(plan, { get = fetchStatus, wait = 5000, now = Date.n
     landing = await get(`${origin}${basePath}/`)
   }
   const wikis = []
-  for (const w of plan.wikis.filter((x) => x.state === "hosted")) {
+  for (const w of plan.wikis) {
     const status = await get(`${origin}${w.path}`)
     wikis.push({
       key: w.key,
@@ -317,10 +125,10 @@ export async function probe(plan, { get = fetchStatus, wait = 5000, now = Date.n
       note:
         status === 200
           ? "serving"
-          : status === 404 && w.published
-            ? `its release exists at ${w.site}/${w.release} and the container does not see it; Docker may not share that path`
+          : status === 404 && w.state === "ready"
+            ? `its release was copied into the tree and the container does not see it; Docker may not share ${plan.dir}`
             : status === 404
-              ? "no release for this target yet"
+              ? "not deployed yet"
               : `answered ${status || "nothing"}`,
     })
   }

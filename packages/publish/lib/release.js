@@ -70,6 +70,7 @@ import { DERIVED_CONFIG, writeSiteConfig } from "./site-config.js"
 import { DEV, HANDOFF, OFFLINE, PUBLISHED, ensureBuildDir, publishedDir } from "./layout.js"
 import { staleness, takeLock } from "./stale.js"
 import { compareRecord, releaseRecord, resolveTarget, retargetScheme } from "./target.js"
+import { deployAfterPublish } from "./deploy.js"
 import { configDir, homeFor, loadMachine, loadMachineIfPresent, machineRegistryFor, readDefaultTarget, registeredAt } from "./machine.js"
 
 /** The toolbox root: packages/publish/lib -> packages/publish -> packages -> root. */
@@ -587,6 +588,20 @@ export function verifyFileUrls(root) {
   return { total, bad }
 }
 
+/** Copy a swapped-in release into its library's tree, saying so; a failure is reported and is not the publish's. */
+function deployHere({ target, key, say }) {
+  try {
+    const result = deployAfterPublish({ machine: loadMachineIfPresent(), target, key })
+    if (!result) return null
+    const copied = result.steps.find((s) => s.step === "release")
+    if (copied) say(`  deployed to ${copied.to} in ${copied.ms} ms`)
+    return copied ? { library: result.library, to: copied.to, ms: copied.ms } : null
+  } catch (e) {
+    say(`  not deployed: ${String(e.message ?? e).split("\n")[0]}`)
+    return null
+  }
+}
+
 /** Where a release is recorded in its own output, read back by `verify` and the server config. */
 export const RELEASE_RECORD = path.join("static", "awtRelease.json")
 
@@ -594,9 +609,10 @@ export const RELEASE_RECORD = path.join("static", "awtRelease.json")
  * The target a build is for and where it lands, from the flags, the declaration and the machine.
  *
  * A base comes from `--base`, or from `site.baseUrl`, which is the project's standing target. With
- * neither, a target is named: `--target`, then `$AWT_TARGET`, then `site.target`, then the machine's
- * `default-target`, and its base is read from `targets.yaml`. A named target hosts several wikis, so
- * the wiki needs a mount under it.
+ * neither, a library is named: `--target` (the CLI's `--library`), then `$AWT_LIBRARY` or `$AWT_TARGET`,
+ * then `site.target`, then the machine's `default-library`, and its base is read from
+ * `libraries/<name>.yaml`. The wiki's address in it is its collection's path and its name there, so a
+ * wiki the library does not hold cannot be published for it.
  *
  * Every target lands in `build/published/<slug>`, one directory per base, so two bases built from one
  * checkout do not overwrite each other. A build with no base anywhere is `build/published/default`, and
@@ -613,15 +629,13 @@ export function planRelease(values, site, declaration, { env = process.env, dir 
 
   let name = values.target
   if (name === undefined && values.base === undefined && !declaredBase) {
-    name = env.AWT_TARGET || declaration.target || readDefaultTarget(dir) || undefined
+    name = env.AWT_LIBRARY || env.AWT_TARGET || declaration.target || readDefaultTarget(dir) || undefined
   }
 
   // A wiki that declares no mount and name still has them if this machine registered it. That is
-  // only for a target the machine names or a base given on the command line: a project that
+  // only for a library the machine names or a base given on the command line: a project that
   // declares its own base is served at it, and a registration must not move it under a mount.
-  const registered = name !== undefined || values.base !== undefined ? registeredAt(loadMachineIfPresent({ dir, die }) ?? { registry: new Map() }, site) : null
-  const mount = values.mount ?? declaration.mount ?? registered?.mount
-  const wikiName = values.name ?? (mount ? (declaration.self ?? registered?.name) : undefined)
+  const registered = name !== undefined || values.base !== undefined ? registeredAt(loadMachineIfPresent({ dir, die }) ?? { wikis: new Map() }, site) : null
 
   let target
   if (name !== undefined) {
@@ -629,16 +643,25 @@ export function planRelease(values, site, declaration, { env = process.env, dir 
     const named = machine.targets.get(name)
     if (!named) {
       die(
-        `no target "${name}" in ${path.join(dir, "targets.yaml")}` +
-          (machine.targets.size ? `; it has ${[...machine.targets.keys()].join(", ")}.` : ", which defines none."),
+        `no library "${name}" in ${path.join(dir, "libraries")}` +
+          (machine.targets.size ? `; it has ${[...machine.targets.keys()].join(", ")}.` : ", which holds none."),
+      )
+    }
+    // In a library the collection decides the address; a flag can still say otherwise for one build.
+    const member = registered?.libraries?.[name]
+    const mount = values.mount ?? member?.mount ?? declaration.mount
+    const wikiName = values.name ?? member?.name ?? (mount ? declaration.self : undefined)
+    if (!mount) {
+      die(
+        `the library "${name}" does not hold this wiki${registered ? ` (${registered.key})` : ""}: ` +
+          `run awt site register --library ${name} --collection <key> here first.`,
       )
     }
     target = resolveTarget({ base: named.base, mount, name: wikiName }, declaration, die)
-    if (!target.mount) {
-      die(`target "${name}" hosts several wikis, so this one needs a mount under it: declare site.mount or pass --mount.`)
-    }
     target.targetName = name
   } else {
+    const mount = values.mount ?? declaration.mount ?? registered?.mount
+    const wikiName = values.name ?? (mount ? (declaration.self ?? registered?.name) : undefined)
     target = resolveTarget({ base: values.base, mount: registered ? mount : values.mount, name: registered ? wikiName : values.name }, declaration, die)
   }
 
@@ -858,11 +881,15 @@ export async function publish(argv = process.argv.slice(2), { reindex, beforeBui
   const configName = values.offline ? await offlineConfig(site, quartz, derived.config) : null
   say()
 
+  // A library deployed to a directory here gets each new release copied into its tree. The key is the
+  // wiki's own, which is what the library lists it under.
+  const deployer = () => deployHere({ target, key: registered?.key ?? declaration.self, say })
+
   if (values.watch) {
     // Resident: Quartz keeps every parsed note, rebuilds the one that changed, and each finished
     // build is swapped into the release. Nothing below runs; it is the one-shot path.
     const { hotPublish } = await import("./hot.js")
-    return hotPublish({ quartz, wiki, out, target, applyScheme, swap, recordPath: RELEASE_RECORD, say, reindex })
+    return hotPublish({ quartz, wiki, out, target, applyScheme, swap, recordPath: RELEASE_RECORD, say, reindex, afterSwap: deployer })
   }
 
   const staging = path.join(path.dirname(out), `.${path.basename(out)}-staging`)
@@ -943,6 +970,7 @@ export async function publish(argv = process.argv.slice(2), { reindex, beforeBui
   }
 
   const replaced = swap(staging, out, prev)
+  const deployed = values.offline ? null : deployer()
   const summary = {
     ok: true,
     mode: values.offline ? "handoff" : "release",
@@ -951,6 +979,7 @@ export async function publish(argv = process.argv.slice(2), { reindex, beforeBui
     site,
     out,
     prev: replaced ? prev : null,
+    deployed,
     ...measured,
   }
 

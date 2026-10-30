@@ -26,7 +26,10 @@ export {
   pluginRegistry,
   addressOf,
   releaseFor,
+  migrateMachine,
+  readDefaultTarget,
 } from './lib/machine.js'
+export {planDeploy, runDeploy, deployAfterPublish, nginxConf, indexPage, accessFor} from './lib/deploy.js'
 export {serve, DEFAULT_PORT, wsPortFor} from './lib/serve.js'
 export {proxy, createProxy, readProxyConfig, defaultConfigFile, DEFAULT_PROXY_PORT} from './lib/proxy.js'
 export {serviceFor, serviceName, installService, uninstallService} from './lib/proxy-service.js'
@@ -34,6 +37,6 @@ export {followNotes, FOLLOWING} from './lib/follow.js'
 export {renderDiagrams, rasterize, disposeRenderer} from './lib/diagrams.js'
 export {prerenderDiagrams} from './lib/diagrams-pass.js'
 export {findFont, loadFont} from './lib/font-metrics.js'
-export {planHost, landingPage, writeHost, up, down, probe, containerName, LABEL} from './lib/host.js'
+export {planHost, up, down, probe, containerName, LABEL} from './lib/host.js'
 export {atlasProject} from './lib/atlas.js'
 export {BUILD, INDEX, DERIVED, OFFLINE, DEV, PUBLISHED, HANDOFF, LEGACY, ensureBuildDir, ensureSiteDir, publishedDir, legacyPresent, removeLegacy, cleanBuild} from './lib/layout.js'

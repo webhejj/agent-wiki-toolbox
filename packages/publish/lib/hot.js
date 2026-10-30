@@ -88,7 +88,7 @@ export function replaceRelease(next, out) {
  *   reindex                   re-emits the link index after each change to the notes
  *   command                   what runs Quartz: `node`, unless a test stands in for it
  */
-export function hotPublish({ quartz, wiki, out, target, applyScheme, swap, recordPath, say, reindex, command = "node" }) {
+export function hotPublish({ quartz, wiki, out, target, applyScheme, swap, recordPath, say, reindex, afterSwap = () => {}, command = "node" }) {
   const base = path.basename(out)
   const dir = path.dirname(out)
   const work = path.join(dir, `.${base}-work`)
@@ -134,6 +134,7 @@ export function hotPublish({ quartz, wiki, out, target, applyScheme, swap, recor
           (kept ? `; the release that stood is kept at ${where(prev)}` : ""),
       )
       first = false
+      afterSwap()
     } catch (e) {
       fs.rmSync(next, { recursive: true, force: true })
       say(`[${clock()}] not published: ${String(e.message ?? e).split("\n")[0]}. The standing release is untouched.`)

@@ -79,7 +79,9 @@ test('a mount needs a name, and a name needs a mount', () => {
 })
 
 test('what is not a path segment, a host or a plain base is refused by name', () => {
-  assert.throws(() => resolveTarget({base: 'example.org', mount: 'Shel/ton', name: 'x'}, {}, die), /mount "Shel\/ton" is not a path segment/)
+  assert.throws(() => resolveTarget({base: 'example.org', mount: 'Shel/ton', name: 'x'}, {}, die), /mount "Shel\/ton" is not a path/)
+  assert.throws(() => resolveTarget({base: 'example.org', mount: 'clients//x', name: 'x'}, {}, die), /mount "clients\/\/x" is not a path/)
+  assert.equal(resolveTarget({base: 'example.org', mount: 'clients/shelton', name: 'dios'}, {}, die).url, 'https://example.org/clients/shelton/dios')
   assert.throws(() => resolveTarget({base: 'example.org', mount: 'a', name: '../x'}, {}, die), /name "..\/x" is not a path segment/)
   assert.throws(() => resolveTarget({base: 'ftp://example.org'}, {}, die), /scheme other than http or https/)
   assert.throws(() => resolveTarget({base: 'https://example.org/docs?x=1'}, {}, die), /query, fragment or credentials/)

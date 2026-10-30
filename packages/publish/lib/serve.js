@@ -165,7 +165,7 @@ export async function serve(argv = process.argv.slice(2), { reindex } = {}) {
   // this port. It is what the symlink ensureQuartz wired points at.
   // A wiki that does not name itself is named by its registration on this machine.
   const declared = readDeclaration(values["site-config"], die)
-  const registered = declared.self ? null : registeredAt(loadMachineIfPresent({ die }) ?? { registry: new Map() }, site)
+  const registered = declared.self ? null : registeredAt(loadMachineIfPresent({ die }) ?? { wikis: new Map() }, site)
   await writeSiteConfig(site, quartz, registered ? { ...declared, self: registered.key } : declared, {
     projectDir: values.project ? path.resolve(values.project) : path.dirname(site),
     port: httpPort,

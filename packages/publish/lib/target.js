@@ -22,6 +22,8 @@
  */
 
 export const SEGMENT = /^[a-z0-9][a-z0-9._-]*$/
+/** A mount, a collection's path: one or more segments, `tools` or `clients/shelton`. */
+export const MOUNT = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/
 
 /**
  * The target, or `null` when no base is given anywhere, which is a build with nowhere
@@ -44,13 +46,11 @@ export function resolveTarget({ base, mount, name } = {}, declaration = {}, die)
   if (rawMount !== undefined && rawMount !== null && rawMount !== "") {
     resolvedName = name ?? declaration.self
     if (!resolvedName) die("a mount needs the wiki's name under it: pass --name or declare site.self.")
-    for (const [label, value] of [
-      ["mount", rawMount],
-      ["name", resolvedName],
-    ]) {
-      if (!SEGMENT.test(String(value))) {
-        die(`the ${label} "${value}" is not a path segment: lowercase letters, digits, "." "_" and "-", starting with a letter or digit.`)
-      }
+    if (!MOUNT.test(String(rawMount))) {
+      die(`the mount "${rawMount}" is not a path: segments of lowercase letters, digits, "." "_" and "-", joined by "/".`)
+    }
+    if (!SEGMENT.test(String(resolvedName))) {
+      die(`the name "${resolvedName}" is not a path segment: lowercase letters, digits, "." "_" and "-", starting with a letter or digit.`)
     }
     segments = [String(rawMount), String(resolvedName)]
   } else if (name !== undefined) {
