@@ -5,7 +5,7 @@
  * writes the real one. `die` throws, which is the behaviour under test where a file is refused.
  */
 import assert from 'node:assert/strict'
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync} from 'node:fs'
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync, existsSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {dirname, join} from 'node:path'
 import test, {after} from 'node:test'
@@ -334,6 +334,33 @@ test('the wikis are described with an address per library', () => {
     public: 'https://example.org/docs/shelton/shelton-dios/',
   })
   assert.deepEqual(view.targets.map((t) => [t.name, t.default, t.deploy]), [['local', true, '~/.local/share/awt/libraries/local/'], ['public', false, 'proton:/opt/docker/awt-wikis/']])
+})
+
+test('each library\'s release is described as fresh, stale or unbuilt against the notes beside it', () => {
+  const home = config({'notes/a.md': '# A\n'})
+  const release = (slug, at) => {
+    const dir = join(home, 'site', 'build', 'published', slug)
+    mkdirSync(join(dir, 'static'), {recursive: true})
+    writeFileSync(join(dir, 'static', 'contentIndex.json'), '{}')
+    writeFileSync(join(dir, 'static', 'awtRelease.json'), JSON.stringify({builtAt: at}))
+  }
+  release('localhost-8088-wikis', '2026-10-30T12:00:00.000Z')
+  release('example-org-docs', '2026-10-30T10:00:00.000Z')
+  const edited = new Date('2026-10-30T11:00:00.000Z')
+  utimesSync(join(home, 'notes', 'a.md'), edited, edited)
+  const member = `    wikis:\n      a:\n        site: ${join(home, 'site')}\n`
+  const dir = config({
+    'awt.yaml': 'default-library: local\n',
+    'libraries/local.yaml': `base: http://localhost:8088/wikis\ncollections:\n  tools:\n    path: tools\n${member}`,
+    'libraries/public.yaml': `base: https://example.org/docs\ncollections:\n  tools:\n    path: tools\n${member}`,
+    'libraries/elsewhere.yaml': 'base: https://elsewhere.org\ncollections:\n  tools:\n    path: tools\n    wikis:\n      a:\n        site: ' + join(home, 'site') + '\n',
+  })
+  const [a] = describeMachine(loadMachine({dir}), 'a').wikis
+  assert.deepEqual(a.releases, {
+    local: {state: 'fresh', builtAt: '2026-10-30T12:00:00.000Z'},
+    public: {state: 'stale', builtAt: '2026-10-30T10:00:00.000Z'},
+    elsewhere: {state: 'unbuilt', builtAt: null},
+  })
 })
 
 // ------------------------------------------------------------------- the config from before libraries

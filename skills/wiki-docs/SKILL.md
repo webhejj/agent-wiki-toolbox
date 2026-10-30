@@ -258,9 +258,9 @@ rather than assuming any.
 - **A library on another machine is reached only when a person asks.** Never publish to one unasked,
   and never from a hook or a watch.
 - **Offer once, after a significant change.** When a session added notes, restructured or rewrote a
-  wiki that a library on another machine holds, say at the end that that server still shows the old
-  version and offer to publish there. A typo fix is not significant. Do not repeat the offer in the
-  session.
+  wiki, run `awt site wikis --key <key>`: a library marked `stale` was built before a note last
+  changed, so its server is behind the working tree. For one on another machine, say so at the end and
+  offer to publish there. A typo fix is not significant. Do not repeat the offer in the session.
 - **A first publish to a library is a person's decision.** It fixes an address, and a wiki the library
   does not hold is refused with the `awt site register` command that would add it.
 

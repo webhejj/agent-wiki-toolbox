@@ -39,6 +39,7 @@ import path from "node:path"
 import { Document, isMap, parseDocument } from "yaml"
 
 import { DEV, PUBLISHED } from "./layout.js"
+import { builtAt, newestNote } from "./stale.js"
 import { MOUNT, resolveTarget, SEGMENT } from "./target.js"
 
 export const KEY = /^[a-z][a-z0-9+.-]*$/
@@ -577,6 +578,27 @@ export async function migrateMachine({ dir = configDir(), dryRun = false, deploy
 // ------------------------------------------------------------------------ describing
 
 /** What `awt site wikis` shows: the libraries, and each wiki with its address in each and the file it came from. */
+/**
+ * Each library's release of a wiki in its checkout, and whether a note is newer than it: `fresh`,
+ * `stale`, or `unbuilt`. It answers whether a server is behind the working tree, as far as this machine
+ * knows: a release is copied when it is published, so one built here is the one a library serves,
+ * unless another machine published there since.
+ */
+function releasesOf(w, machine) {
+  if (!w.site) return {}
+  // The notes sit beside the site in the wiki's home: <home>/notes and <home>/site.
+  const newest = newestNote(path.join(path.dirname(w.site), "notes"))
+  const out = {}
+  for (const t of machine.targets.values()) {
+    const url = addressOf(w, t)
+    if (!url) continue
+    const dir = releaseFor(w, t, url)
+    const at = dir ? builtAt(dir, path.join("static", "awtRelease.json")) : null
+    out[t.name] = at === null ? { state: "unbuilt", builtAt: null } : { state: newest > at ? "stale" : "fresh", builtAt: new Date(at).toISOString() }
+  }
+  return out
+}
+
 export function describeMachine(machine, key = null) {
   const targets = [...machine.targets.values()].map((t) => ({
     name: t.name,
@@ -602,6 +624,7 @@ export function describeMachine(machine, key = null) {
           return [t.name, url ? `${url}/` : null]
         }),
       ),
+      releases: releasesOf(w, machine),
       from: w.from,
     }))
   return { dir: machine.dir, targets, wikis }

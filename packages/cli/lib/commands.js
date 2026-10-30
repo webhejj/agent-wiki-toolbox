@@ -177,6 +177,16 @@ const SITE_OPTIONS = {wiki: {type: 'string'}, site: {type: 'string'}}
 // own name under its mount is `--name`.
 const TARGET_OPTIONS = {base: {type: 'string'}, mount: {type: 'string'}, name: {type: 'string'}, library: {type: 'string'}, target: {type: 'string'}}
 
+/** A library's release of a wiki, beside its address: built when, and stale if a note is newer. */
+function releaseNote(release) {
+  if (!release) return ''
+  if (release.state === 'unbuilt') return '  (unbuilt)'
+  const at = new Date(release.builtAt)
+  const pad = (n) => String(n).padStart(2, '0')
+  const local = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+  return `  (built ${local}${release.state === 'stale' ? ', stale' : ''})`
+}
+
 /** The library a command names: --library, or --target, its name from before libraries. Both is a refusal. */
 function libraryFlag(command, values) {
   if (values.library !== undefined && values.target !== undefined && values.library !== values.target) {
@@ -1559,6 +1569,10 @@ export const COMMANDS = [
     notes: [
       'Reads ~/.config/awt (or $AWT_CONFIG_DIR): awt.yaml and libraries/*.yaml.',
       'The wiki-level settings in a project\'s awt.config.mjs are not shown: this is the machine.',
+      '',
+      'Beside each address: when the release for that library was built in the wiki\'s checkout, and',
+      'whether a note has changed since (stale), or that there is none (unbuilt). A publish copies the',
+      'release to the library, so a stale one means the server is behind this working tree.',
     ],
     options: {...OUTPUT_OPTIONS, key: {type: 'string'}},
     async run({values}) {
@@ -1580,7 +1594,7 @@ export const COMMANDS = [
           lines.push(value.wikis.length ? 'wikis:' : 'wikis: none registered')
           for (const w of value.wikis) {
             lines.push(`  ${w.key}${w.site ? `  ${w.site}` : ''}${w.dev ? `  dev ${w.dev}` : ''}`)
-            for (const [target, url] of Object.entries(w.addresses)) if (url) lines.push(`    ${target.padEnd(8)}${url}`)
+            for (const [target, url] of Object.entries(w.addresses)) if (url) lines.push(`    ${target.padEnd(8)}${url}${releaseNote(w.releases?.[target])}`)
           }
           return lines.join('\n')
         })
