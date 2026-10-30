@@ -1627,9 +1627,10 @@ export const COMMANDS = [
         const steps = runDeploy(plan, {pages: !values.key, dryRun: values['dry-run']})
         emit(values, {ok: true, library: name, to: plan.to.spec, dryRun: values['dry-run'], wikis: plan.wikis, steps}, () => {
           const lines = [`library ${name}  ${plan.base}  ->  ${plan.to.spec}${values['dry-run'] ? '  (dry run)' : ''}`]
+          const width = Math.max(0, ...plan.wikis.map((w) => w.path.length)) + 2
           for (const w of plan.wikis) {
             const step = steps.find((s) => s.key === w.key)
-            lines.push(`  ${w.path.padEnd(28)}${w.state === 'ready' ? `${values['dry-run'] ? 'would copy' : 'copied'}${step?.ms !== undefined && !values['dry-run'] ? ` in ${step.ms} ms` : ''}` : `skipped   ${w.reason}`}`)
+            lines.push(`  ${w.path.padEnd(width)}${w.state === 'ready' ? `${values['dry-run'] ? 'would copy' : 'copied'}${step?.ms !== undefined && !values['dry-run'] ? ` in ${step.ms} ms` : ''}` : `skipped   ${w.reason}`}`)
           }
           return lines.join('\n')
         })
@@ -1713,9 +1714,10 @@ export const COMMANDS = [
         emit(values, {ok: !failed, library: name, base: plan.base, port: plan.port, dir: plan.dir, dryRun: values['dry-run'], steps, wikis: plan.wikis, docker: plan.docker, served}, () => {
           const lines = [`library ${name}  ${plan.base}  (port ${plan.port})`, `tree    ${plan.dir}`]
           lines.push(plan.wikis.length ? 'wikis:' : 'wikis: none registered (awt site register)')
+          const width = Math.max(0, ...plan.wikis.map((w) => w.path.length)) + 2
           for (const w of plan.wikis) {
             const answer = served?.wikis.find((x) => x.key === w.key)
-            lines.push(`  ${w.path.padEnd(32)}${answer ? answer.note : w.state === 'ready' ? (values['dry-run'] ? 'would copy' : 'copied') : `skipped   ${w.reason}`}`)
+            lines.push(`  ${w.path.padEnd(width)}${answer ? answer.note : w.state === 'ready' ? (values['dry-run'] ? 'would copy' : 'copied') : `skipped   ${w.reason}`}`)
           }
           if (served) lines.push(served.landing === 200 ? `\nserving at http://localhost:${plan.port}${new URL(plan.base).pathname.replace(/\/+$/, '')}/` : `\nthe server answered ${served.landing || 'nothing'} for the landing page`)
           else if (!values['dry-run']) lines.push(`\nto serve it: awt site host --library ${name} --up\n  or: docker ${plan.docker.args.join(' ')}`)
