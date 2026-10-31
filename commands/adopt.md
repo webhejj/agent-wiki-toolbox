@@ -1,5 +1,5 @@
 ---
-description: Reconcile a project's own files against the skills it loads — strip restated mechanics, remove the wiring the plugin replaced, and report the choices that need a decision.
+description: Reconcile a project's own files against the skills it loads — strip restated mechanics, remove the wiring the plugin replaced, bring the machine's publishing config up to the current format, and report the choices that need a decision.
 ---
 
 # The adoption sweep
@@ -19,8 +19,8 @@ behind it; the other four have none, which is why they were the ones missing.
 |--------------------------------------------------------------------------------|----------|
 | A new version of the plugin is installed                                       | All      |
 | Asked whether the project is still in step with its skills — any phrasing      | All      |
-| **You have written or rewritten a `meta/` note, or the project's `CLAUDE.md`** | 2, 3, 4  |
-| **Content has been extracted out of this wiki into a skill**                   | 2, 3, 4  |
+| **You have written or rewritten a `meta/` note, or the project's `CLAUDE.md`** | 2, 3, 5  |
+| **Content has been extracted out of this wiki into a skill**                   | 2, 3, 5  |
 | **Asked to deduplicate the wiki, or to resolve contradictions in it**          | All      |
 
 **The pull side has no fixed wording, so match on intent.** Nobody asks for "the adoption sweep".
@@ -100,13 +100,52 @@ Any local sentence naming a command, flag, tool or field that **no longer appear
 skill** is either a declared deviation or a leftover. Leftovers do the damage — they are confidently
 wrong rather than merely redundant.
 
+**The names from before libraries are leftovers too.** `targets.yaml`, `default-target`,
+`registry.d/`, `groups` and `overrides.d/` are gone from the machine config, a `mount` or a group is
+now a collection, and `awt site register` takes `--collection`. A sentence telling an agent to use
+any of them is stale; `--target` and `$AWT_TARGET` still work, as old names for `--library` and
+`$AWT_LIBRARY`.
+
 **One standing rewrite that test cannot reach: a local file naming any formatter other than `awt fmt`
 is stale.** It escapes the test because the superseded name was a live command once and still reads
 as one — `mdfmt` is the form this usually takes — so the hit looks current rather than like a
 leftover. Rewrite it anyway, including where the file says both work, and including files outside the
 wiki: the split that sent a README to one formatter and a note to another is itself the stale thing.
 
-## 4. Report, do not silently rewrite
+## 4. The machine's publishing config
+
+**This is the machine's, not the project's**, so it runs once per machine, on the release trigger or
+when a publish finds no library, and every project on the machine shares the result. The config is
+`$AWT_CONFIG_DIR`, else `~/.config/awt/`.
+
+**The config from before libraries is ignored without a word.** A machine with `targets.yaml`,
+`default-target`, `groups`, `registry.d/` or `overrides.d/` and no `libraries/` gets no error: the
+libraries listing comes back empty, and the Stop hook's publish skips. Look for those files whenever the
+plugin is new on a machine.
+
+| Found                                  | Do                                                       |
+|----------------------------------------|----------------------------------------------------------|
+| The old files, no `libraries/`         | Migrate, below                                           |
+| `libraries/` and a `legacy/` beside it | Migrated. `legacy/` is the old files, kept for reference |
+| `host/` with no container mounting it  | The old `awt site host` output. Nothing reads it         |
+| Neither                                | Nothing to do                                            |
+
+**Migrating rewrites every project's addresses, so it is the user's call.** Run
+`awt site migrate --machine --dry-run`, show the libraries it would write and any wiki it reports and
+leaves out, and wait for the go. Then, on the go:
+
+1. `awt site migrate --machine`. The old files move to `legacy/`.
+2. Read `libraries/*.yaml` with the user: collection paths and titles come from the old groups and
+   are worth a look before anything is published at them.
+3. In each wiki's project, `awt site publish` for the default library. Every address moved to its
+   collection's path, and links between wikis are fixed only by rebuilding the wiki that holds them.
+4. `awt site host --up`, when the machine serves its local library: it replaces the old container
+   with one over the library's tree.
+5. A library on another machine is published to only when asked, per the wiki-docs skill.
+
+`legacy/` and `host/` go when the user says so, not before.
+
+## 5. Report, do not silently rewrite
 
 Deleting a restated mechanic is a documentation fix and needs no permission. **Changing a `meta/`
 vocabulary is a project decision** — front-matter values, folder layout, the navigation axis, what
