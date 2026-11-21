@@ -307,9 +307,10 @@ test('connections names a miss instead of crashing on it', (t) => {
   assert.match(found.stdout, /links:\s+none/)
 })
 
-test('--version answers what is installed', () => {
+test('--version answers the plugin version, and says when it runs from a checkout', () => {
+  const plugin = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
   const {stdout} = awt(['--version'])
-  assert.match(stdout, /^awt \d+\.\d+\.\d+ \(.+\)$/m)
+  assert.equal(stdout.trim(), `awt ${plugin.version} (working copy)`)
 })
 
 test('an unknown command exits 2 and shows the list', () => {

@@ -6,6 +6,8 @@
  * The server calls the same `core` the CLI does. Nothing is watched: the index is
  * a pure function of the tree, so a write between two calls is seen by the second.
  */
+import {readFileSync} from 'node:fs'
+
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js'
 import {z} from 'zod'
 
@@ -109,6 +111,15 @@ function reply(value) {
  * the same three, or null for "there is no wiki here" — and it is asked on every
  * call rather than once at startup.
  */
+/** The plugin's version, which a release bumps; 0.0.0 when the manifest cannot be read. */
+function pluginVersion() {
+  try {
+    return JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version
+  } catch {
+    return '0.0.0'
+  }
+}
+
 export function createServer({
   notesDir,
   rootDir = null,
@@ -117,7 +128,7 @@ export function createServer({
   allowWrites = false,
   name = 'agent-wiki-toolbox',
 } = {}) {
-  const server = new McpServer({name, version: '0.0.0'})
+  const server = new McpServer({name, version: pluginVersion()})
 
   // Resolved per call, not once at startup. A server started in a directory that
   // becomes a wiki later — bootstrapped by the very session talking to it — sees

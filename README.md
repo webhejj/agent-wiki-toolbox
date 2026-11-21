@@ -214,11 +214,16 @@ other there — every one of them passes when its file is run alone, and the sam
 end to end through the real CLI under bun. And the Quartz plugins are imported by Quartz's own node
 process, which is what keeps this source plain node-compatible ESM rather than anything bun-specific.
 
-Install it with `scripts/install`, the only step that exposes a change. It copies this working copy
-to `~/.claude/skills/awt`, where Claude Code adopts it as the **`awt` plugin** — and points
-`~/.local/bin/awt` at the same tree, so a shell, a site build and a session all run one copy.
-`SETUP.md` has the full sequence, including moving a machine off the pre-plugin `bin/install` +
-`skills add` setup.
+It installs as the **`awt` plugin** from the `webhejj` marketplace, `claude plugin install
+awt@webhejj`, and the marketplace's `install-cli` puts a shim at `~/.local/bin/awt` that runs the
+installed copy, so a shell, a site build and a session all run one release. `SETUP.md` has the full
+sequence, including moving a machine off the older `scripts/install` copy and the pre-plugin
+`bin/install` + `skills add` setup.
+
+Try a change without installing it: `claude --plugin-dir .` loads this working copy in place of the
+installed plugin for that one session and writes nothing. A release is a version bump in
+`.claude-plugin/plugin.json`, pushed to `master`: Claude Code updates an install only when that string
+changes, while a fresh install takes `master` as it is, so `master` stays releasable.
 
 What the plugin is, beyond the binary:
 
@@ -255,5 +260,5 @@ its own**, and nothing in it may reference the workspace at build or run time.
 
 ## Status
 
-**ALPHA.** No tags, no releases, no npm publish planned. Install from a working copy; ask what is
-running with `awt --version`.
+**ALPHA.** Released through the `webhejj` marketplace by the version in `.claude-plugin/plugin.json`;
+no tags, no npm publish planned. Ask what is running with `awt --version`.

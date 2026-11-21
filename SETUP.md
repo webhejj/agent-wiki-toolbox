@@ -10,35 +10,35 @@ A project can be fully current on one and stale on the other; they are not the s
 ## Prerequisites
 
 - **`bun` on `PATH`**, the version `mise.toml` pins (`1.3.14` as of this writing) — `command -v bun`.
-  The install script refuses to run without it, on purpose: a machine with only `npm` would resolve
+  `bin/awt` installs the dependencies with it on first use and refuses to run without it, on purpose: a machine with only `npm` would resolve
   its own versions instead of the ones `bun.lock` pins, which is exactly what a formatter that has to
   stay byte-identical to IntelliJ cannot tolerate.
 - **`node`**, the version `mise.toml` pins (`24.18.0`), needed only for `npm test` and for the Quartz
   plugins, which run inside Quartz's own node process. Not needed to install or run `awt` itself.
-- **A Claude Code build that adopts a plugin from `~/.claude/skills/`.** A directory there carrying
-  `.claude-plugin/plugin.json` is adopted as a plugin named `<name>@skills-dir` — the mechanism
-  `scripts/install` relies on, and the reason nothing here touches
-  `~/.claude/plugins/known_marketplaces.json` or `installed_plugins.json`. Those are the marketplace
-  path, for a plugin fetched by a team that isn't cloning this repo; a working copy on this machine
-  never needs it.
+- **The `webhejj` marketplace**, which lists this plugin: `claude plugin marketplace add
+  webhejj/claude-plugins`, once per machine.
 
 ## Clean install
 
 Nothing of the toolbox on this machine yet — no `~/.local/lib/agent-wiki-toolbox`, no
-`~/.agents/skills/wiki-docs`.
+`~/.agents/skills/wiki-docs`, no `~/.claude/skills/awt`.
 
 ```shell
-git clone git@github.com:webhejj/agent-wiki-toolbox.git
-cd agent-wiki-toolbox
-scripts/install
+claude plugin install awt@webhejj
+~/.claude/plugins/marketplaces/webhejj/scripts/install-cli awt
 ```
 
-That copies the working copy to `~/.claude/skills/awt`, runs `bun install --production` there, and
-points `~/.local/bin/awt` at `$PLUGIN/bin/awt`. Verify:
+The first installs the plugin into Claude Code's plugin cache; sessions get `awt` on their `PATH`
+from its `bin/`. The second puts a shim at `~/.local/bin/awt` for everything outside a session. The
+shim looks the install up each time it runs, so an update needs no second step. The dependencies are
+installed by `bin/awt` the first time it runs. Verify:
 
 ```shell
-awt --version   # reports the commit scripts/install stamped, e.g. "awt 0.0.0 (7d754a3)"
+awt --version   # awt 0.1.0
 ```
+
+Auto-update is off for the marketplace. `claude plugin marketplace update webhejj`, then
+`claude plugin update awt@webhejj`, takes a new release.
 
 **Then start a new Claude Code session** — a running one keeps whatever it already loaded, so this
 is the one step nothing shortcuts. In the new session:
@@ -53,6 +53,22 @@ is the one step nothing shortcuts. In the new session:
 **Nothing in a project needs to name the plugin.** Every automatic part — the guard, the MCP server,
 the mandate, the format-and-check at `Stop` — is gated on `awt.config.mjs` at the project root and
 inert without it. A project that has no wiki yet gets one from `/awt:init`.
+
+## Upgrading from a `scripts/install` copy
+
+Before the marketplace, `scripts/install` copied a working copy to `~/.claude/skills/awt`, which
+Claude Code loads as `awt@skills-dir`, and linked `~/.local/bin/awt` into it. Left in place, that copy
+loads beside the marketplace one: two MCP servers, every hook twice.
+
+```shell
+rm -rf ~/.claude/skills/awt
+claude plugin install awt@webhejj
+~/.claude/plugins/marketplaces/webhejj/scripts/install-cli awt   # replaces the old link
+```
+
+A site's Quartz config is derived from wherever `awt` runs, before each build, so the next build
+takes the new path. A project still carrying `awt-*` symlinks into `~/.claude/skills/awt` is on the
+older layout: *Moving a wiki's Quartz config into `awt.config.mjs`* below removes them.
 
 ## Upgrading from a pre-plugin install
 
@@ -72,8 +88,7 @@ rm -f ~/.claude/skills/wiki-docs        # the symlink `skills add` created
 rm -rf ~/.agents/skills/wiki-docs       # the actual install target
 ```
 
-Confirm clean before moving on — `scripts/install` replaces `~/.claude/skills/awt` wholesale, but it
-does not know about paths outside that:
+Confirm clean before moving on — the plugin install does not know about paths outside its own:
 
 ```shell
 which awt        # nothing
@@ -82,11 +97,7 @@ ls ~/.claude/skills/ | grep wiki-docs   # nothing
 
 ### 2. Install the plugin
 
-```shell
-cd agent-wiki-toolbox   # the working copy, pulled to the commit you want installed
-scripts/install
-awt --version
-```
+The *Clean install* commands above.
 
 ### 3. Reconcile every project that was wired to the old setup
 
@@ -112,7 +123,7 @@ reader has to notice means the same thing as absence.
 ### 4. Verify
 
 ```shell
-awt --version           # the new commit
+awt --version           # the installed release
 awt check                # this machine's wikis still resolve and are healthy
 awt fmt --dry-run        # formatting and front matter, unaffected by the switch
 ```
@@ -167,7 +178,7 @@ never there is a no-op, not an error.
 |------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
 | `site/.quartz-src/`                                                    | The old git clone plus its own `npm install` — the ~250–280 MB this whole switch exists to stop paying per project |
 | `site/quartz.pin`                                                      | Read from the toolbox's own `quartz.pin` now, not per project — every wiki this machine builds shares one pin      |
-| `site/awt-links`, `awt-cross-wiki`, `awt-headings`, `awt-folder-notes` | Gone: the one plugin is named by absolute path in the config the toolbox derives, and Quartz links it itself |
+| `site/awt-links`, `awt-cross-wiki`, `awt-headings`, `awt-folder-notes` | Gone: the one plugin is named by absolute path in the config the toolbox derives, and Quartz links it itself       |
 
 ```shell
 rm -rf site/.quartz-src site/quartz.pin
@@ -306,9 +317,9 @@ the current surface.
 Three things read `awt` from outside any Claude Code session, so installing the plugin does not
 touch them and each needs its own check after a switch:
 
-- **A plain shell, a terminal, a scheduled job, a non-Claude agent.** All of these get the new
-  binary automatically, because `scripts/install` repoints the same `~/.local/bin/awt` symlink the
-  old `bin/install` used — but they now need `bun` on `PATH` too, since the binary's shebang is
+- **A plain shell, a terminal, a scheduled job, a non-Claude agent.** All of these reach the plugin
+  through the `~/.local/bin/awt` shim, which runs whichever copy is installed — but they need `bun`
+  on `PATH` too, since the binary's shebang is
   `bun`, not `node`. A `launchd` job or anything else with a minimal environment can lose `awt` this
   way with no message beyond "command not found".
 - **A read-only `.mcp.json` mount of another project's wiki** (`awt mcp -w
@@ -319,9 +330,9 @@ touch them and each needs its own check after a switch:
 ## Uninstalling
 
 ```shell
-rm -rf ~/.claude/skills/awt
+claude plugin uninstall awt@webhejj
 rm -f ~/.local/bin/awt
 ```
 
-Both reverse cleanly, with nothing left on disk pointing at either — that is what "one target, not
-two" in `scripts/install`'s own header comment means in practice.
+The shim left behind without the second line says the plugin is not installed rather than running
+something stale.

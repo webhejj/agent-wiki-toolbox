@@ -2135,13 +2135,13 @@ export const COMMANDS = [
   },
 ]
 
+/**
+ * `awt 0.1.0` from an install, `awt 0.1.0 (working copy)` from a checkout, which may hold changes the
+ * version does not cover. The version is the plugin's, from `.claude-plugin/plugin.json`: it is what
+ * a release bumps and what Claude Code compares to decide whether there is an update.
+ */
 export function version() {
-  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  let stamp = ''
-  try {
-    stamp = readFileSync(new URL('../../../INSTALLED_FROM', import.meta.url), 'utf8').trim()
-  } catch {
-    stamp = 'working copy'
-  }
-  return `awt ${manifest.version} (${stamp})`
+  const manifest = JSON.parse(readFileSync(new URL('../../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
+  const checkout = existsSync(fileURLToPath(new URL('../../../.git', import.meta.url)))
+  return `awt ${manifest.version}${checkout ? ' (working copy)' : ''}`
 }

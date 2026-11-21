@@ -1,7 +1,7 @@
 {
   "name": "awt",
   "description": "Work with a wikilinked markdown wiki through the agent-wiki-toolbox: the link graph, structural edits that keep it intact, formatting, and the guard that routes wiki work through the skill.",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "author": {
     "name": "Gergely Nagy"
   },
